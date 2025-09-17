@@ -1,0 +1,122 @@
+from django.contrib.auth.password_validation import validate_password
+from django.utils import timezone
+from rest_framework import permissions, serializers, status
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework.viewsets import ModelViewSet
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+
+from .models import AuthSession, PasswordResetToken, User
+from .serializers import UserSerializer, UserCreateSerializer, AuthSessionSerializer, PasswordResetTokenSerializer
+from schools.permissions import IsSuperAdmin, IsSchoolAdminOrSuperAdmin
+
+
+class LoginView(TokenObtainPairView):
+    pass
+
+
+class RefreshView(TokenRefreshView):
+    pass
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    current_password = serializers.CharField()
+    new_password = serializers.CharField()
+
+    def validate(self, attrs):
+        user = self.context["request"].user
+        if not user.check_password(attrs["current_password"]):
+            raise serializers.ValidationError({"current_password": "Incorrect password"})
+        validate_password(attrs["new_password"], user)
+        return attrs
+
+
+class ChangePasswordView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        serializer = ChangePasswordSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        request.user.set_password(serializer.validated_data["new_password"])
+        request.user.save()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class RequestPasswordResetSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+
+class ConfirmPasswordResetSerializer(serializers.Serializer):
+    token = serializers.CharField()
+    new_password = serializers.CharField()
+
+
+@api_view(["POST"])
+@permission_classes([permissions.AllowAny])
+def request_password_reset(request):
+    serializer = RequestPasswordResetSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    try:
+        user = User.objects.get(email=serializer.validated_data["email"])
+    except User.DoesNotExist:
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    token = PasswordResetToken.objects.create(
+        user=user,
+        expires_at=timezone.now() + timezone.timedelta(hours=1),
+    )
+    # TODO: email token.token to user
+    return Response({"token": token.token}, status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
+@permission_classes([permissions.AllowAny])
+def confirm_password_reset(request):
+    serializer = ConfirmPasswordResetSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    try:
+        prt = PasswordResetToken.objects.get(token=serializer.validated_data["token"], used=False)
+    except PasswordResetToken.DoesNotExist:
+        return Response({"detail": "Invalid token"}, status=status.HTTP_400_BAD_REQUEST)
+    if prt.expires_at < timezone.now():
+        return Response({"detail": "Token expired"}, status=status.HTTP_400_BAD_REQUEST)
+    user = prt.user
+    validate_password(serializer.validated_data["new_password"], user)
+    user.set_password(serializer.validated_data["new_password"])
+    user.save()
+    prt.used = True
+    prt.save(update_fields=["used"])
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class UserViewSet(ModelViewSet):
+    queryset = User.objects.select_related('school').all()
+    serializer_class = UserSerializer
+    permission_classes = [IsSuperAdmin]
+    filterset_fields = ['role', 'school', 'is_active']
+    search_fields = ['username', 'email']
+    ordering_fields = ['username', 'email', 'role']
+    ordering = ['username']
+    
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return UserCreateSerializer
+        return UserSerializer
+
+
+class AuthSessionViewSet(ModelViewSet):
+    queryset = AuthSession.objects.select_related('user').all()
+    serializer_class = AuthSessionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        # Users can only see their own sessions
+        if self.request.user.role in ['superadmin', 'schooladmin']:
+            return self.queryset
+        return self.queryset.filter(user=self.request.user)
+
+
+class PasswordResetTokenViewSet(ModelViewSet):
+    queryset = PasswordResetToken.objects.select_related('user').all()
+    serializer_class = PasswordResetTokenSerializer
+    permission_classes = [IsSuperAdmin]
