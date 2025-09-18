@@ -345,497 +345,493 @@ POST   /api/assessments/answers/bulk-grade/
 ]
 ```
 
-## 🎯 Frontend Integration Guide for Tests
+## 🎯 Test System API Examples
 
-### 1. Teacher: Creating Tests
+### 1. Teacher: Creating and Managing Tests
 
 #### Create Test with Questions
-```javascript
-// POST /api/assessments/tests/
-const createTest = async (testData) => {
-  const response = await fetch('/api/assessments/tests/', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      course_section: 1,
-      title: "Math Quiz",
-      description: "Basic math concepts",
-      time_limit_minutes: 30,
-      allow_multiple_attempts: true,
-      max_attempts: 3,
-      show_correct_answers: true,
-      show_feedback: true,
-      show_score_immediately: false,
-      reveal_results_at: "2024-01-15T10:00:00Z",
-      questions: [
-        {
-          type: "multiple_choice",
-          text: "What is 2 + 2?",
-          points: 5,
-          position: 1,
-          options: [
-            { text: "3", is_correct: false, position: 1 },
-            { text: "4", is_correct: true, position: 2 },
-            { text: "5", is_correct: false, position: 3 }
-          ]
-        },
-        {
-          type: "choose_all",
-          text: "Which are prime numbers?",
-          points: 10,
-          position: 2,
-          options: [
-            { text: "2", is_correct: true, position: 1 },
-            { text: "3", is_correct: true, position: 2 },
-            { text: "4", is_correct: false, position: 3 },
-            { text: "5", is_correct: true, position: 4 }
-          ]
-        },
-        {
-          type: "open_question",
-          text: "Explain photosynthesis",
-          points: 15,
-          position: 3,
-          correct_answer_text: "Process by which plants convert sunlight to energy",
-          sample_answer: "Plants use sunlight, water, and CO2 to create glucose"
-        },
-        {
-          type: "matching",
-          text: "Match countries with capitals",
-          points: 20,
-          position: 4,
-          matching_pairs_json: [
-            { left: "France", right: "Paris" },
-            { left: "Germany", right: "Berlin" },
-            { left: "Spain", right: "Madrid" }
-          ]
-        }
+```http
+POST /api/assessments/tests/
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{
+  "course_section": 1,
+  "title": "Math Quiz",
+  "description": "Basic math concepts",
+  "time_limit_minutes": 30,
+  "allow_multiple_attempts": true,
+  "max_attempts": 3,
+  "show_correct_answers": true,
+  "show_feedback": true,
+  "show_score_immediately": false,
+  "reveal_results_at": "2024-01-15T10:00:00Z",
+  "questions": [
+    {
+      "type": "multiple_choice",
+      "text": "What is 2 + 2?",
+      "points": 5,
+      "position": 1,
+      "options": [
+        { "text": "3", "is_correct": false, "position": 1 },
+        { "text": "4", "is_correct": true, "position": 2 },
+        { "text": "5", "is_correct": false, "position": 3 }
       ]
-    })
-  });
-  return response.json();
-};
+    },
+    {
+      "type": "choose_all",
+      "text": "Which are prime numbers?",
+      "points": 10,
+      "position": 2,
+      "options": [
+        { "text": "2", "is_correct": true, "position": 1 },
+        { "text": "3", "is_correct": true, "position": 2 },
+        { "text": "4", "is_correct": false, "position": 3 },
+        { "text": "5", "is_correct": true, "position": 4 }
+      ]
+    },
+    {
+      "type": "open_question",
+      "text": "Explain photosynthesis",
+      "points": 15,
+      "position": 3,
+      "correct_answer_text": "Process by which plants convert sunlight to energy",
+      "sample_answer": "Plants use sunlight, water, and CO2 to create glucose"
+    },
+    {
+      "type": "matching",
+      "text": "Match countries with capitals",
+      "points": 20,
+      "position": 4,
+      "matching_pairs_json": [
+        { "left": "France", "right": "Paris" },
+        { "left": "Germany", "right": "Berlin" },
+        { "left": "Spain", "right": "Madrid" }
+      ]
+    }
+  ]
+}
 ```
 
-#### Add Questions to Existing Test
-```javascript
-// POST /api/assessments/questions/
-const addQuestion = async (testId, questionData) => {
-  const response = await fetch('/api/assessments/questions/', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      test: testId,
-      type: "multiple_choice",
-      text: "What is the capital of France?",
-      points: 10,
-      position: 5,
-      options: [
-        { text: "London", is_correct: false, position: 1 },
-        { text: "Paris", is_correct: true, position: 2 },
-        { text: "Berlin", is_correct: false, position: 3 }
+**Response:**
+```json
+{
+  "id": 1,
+  "course_section": 1,
+  "title": "Math Quiz",
+  "description": "Basic math concepts",
+  "is_published": false,
+  "time_limit_minutes": 30,
+  "allow_multiple_attempts": true,
+  "max_attempts": 3,
+  "show_correct_answers": true,
+  "show_feedback": true,
+  "show_score_immediately": false,
+  "reveal_results_at": "2024-01-15T10:00:00Z",
+  "total_points": 50,
+  "questions": [
+    {
+      "id": 1,
+      "type": "multiple_choice",
+      "text": "What is 2 + 2?",
+      "points": 5,
+      "position": 1,
+      "options": [
+        { "id": 1, "text": "3", "is_correct": false, "position": 1 },
+        { "id": 2, "text": "4", "is_correct": true, "position": 2 },
+        { "id": 3, "text": "5", "is_correct": false, "position": 3 }
       ]
-    })
-  });
-  return response.json();
-};
+    }
+  ]
+}
+```
+
+#### Add Question to Existing Test
+```http
+POST /api/assessments/questions/
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{
+  "test": 1,
+  "type": "multiple_choice",
+  "text": "What is the capital of France?",
+  "points": 10,
+  "position": 5,
+  "options": [
+    { "text": "London", "is_correct": false, "position": 1 },
+    { "text": "Paris", "is_correct": true, "position": 2 },
+    { "text": "Berlin", "is_correct": false, "position": 3 }
+  ]
+}
+```
+
+#### Update Question
+```http
+PATCH /api/assessments/questions/5/
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{
+  "text": "What is the capital of France? (Updated)",
+  "points": 15
+}
+```
+
+#### Delete Question
+```http
+DELETE /api/assessments/questions/5/
+Authorization: Bearer <token>
+```
+
+#### Add Option to Question
+```http
+POST /api/assessments/options/
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{
+  "question": 5,
+  "text": "Rome",
+  "is_correct": false,
+  "position": 4
+}
+```
+
+#### Publish Test
+```http
+POST /api/assessments/tests/1/publish/
+Authorization: Bearer <token>
 ```
 
 ### 2. Student: Taking Tests
 
 #### Start Test Attempt
-```javascript
-// POST /api/assessments/attempts/start/
-const startTest = async (testId) => {
-  const response = await fetch('/api/assessments/attempts/start/', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ test_id: testId })
-  });
-  return response.json();
-};
+```http
+POST /api/assessments/attempts/start/
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{
+  "test_id": 1
+}
 ```
 
-#### Submit Answer for Question
-```javascript
-// POST /api/assessments/attempts/{id}/submit-answer/
-const submitAnswer = async (attemptId, questionId, answerData) => {
-  const response = await fetch(`/api/assessments/attempts/${attemptId}/submit-answer/`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      question_id: questionId,
-      // For multiple choice
-      selected_option_ids: [2, 3],
-      // For open questions
-      text_answer: "My detailed answer here",
-      // For matching questions
-      matching_answers_json: [
-        { left: "France", right: "Paris" },
-        { left: "Germany", right: "Berlin" }
-      ]
-    })
-  });
-  return response.json();
-};
+**Response:**
+```json
+{
+  "id": 1,
+  "test": 1,
+  "student": 2,
+  "attempt_number": 1,
+  "started_at": "2024-01-10T10:00:00Z",
+  "submitted_at": null,
+  "score": null,
+  "max_score": null,
+  "is_completed": false,
+  "is_graded": false,
+  "can_view_results": false,
+  "answers": []
+}
+```
+
+#### Submit Answer for Multiple Choice Question
+```http
+POST /api/assessments/attempts/1/submit-answer/
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{
+  "question_id": 1,
+  "selected_option_ids": [2]
+}
+```
+
+#### Submit Answer for Choose All Question
+```http
+POST /api/assessments/attempts/1/submit-answer/
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{
+  "question_id": 2,
+  "selected_option_ids": [4, 5, 7]
+}
+```
+
+#### Submit Answer for Open Question
+```http
+POST /api/assessments/attempts/1/submit-answer/
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{
+  "question_id": 3,
+  "text_answer": "Photosynthesis is the process by which plants convert sunlight, water, and carbon dioxide into glucose and oxygen."
+}
+```
+
+#### Submit Answer for Matching Question
+```http
+POST /api/assessments/attempts/1/submit-answer/
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{
+  "question_id": 4,
+  "matching_answers_json": [
+    { "left": "France", "right": "Paris" },
+    { "left": "Germany", "right": "Berlin" },
+    { "left": "Spain", "right": "Madrid" }
+  ]
+}
 ```
 
 #### Submit Completed Test
-```javascript
-// POST /api/assessments/attempts/{id}/submit/
-const submitTest = async (attemptId) => {
-  const response = await fetch(`/api/assessments/attempts/${attemptId}/submit/`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json'
+```http
+POST /api/assessments/attempts/1/submit/
+Authorization: Bearer <token>
+```
+
+**Response:**
+```json
+{
+  "id": 1,
+  "test": 1,
+  "student": 2,
+  "attempt_number": 1,
+  "started_at": "2024-01-10T10:00:00Z",
+  "submitted_at": "2024-01-10T10:25:00Z",
+  "score": 45,
+  "max_score": 50,
+  "percentage": 90.0,
+  "is_completed": true,
+  "is_graded": true,
+  "time_spent_minutes": 25.0,
+  "answers": [
+    {
+      "id": 1,
+      "question": 1,
+      "selected_options": [
+        { "id": 2, "text": "4", "is_correct": true }
+      ],
+      "score": 5,
+      "max_score": 5,
+      "is_correct": true
     }
-  });
-  return response.json();
-};
+  ]
+}
 ```
 
-### 3. Frontend UI Components
+### 3. Viewing Results
 
-#### Test List Component
-```javascript
-const TestList = () => {
-  const [tests, setTests] = useState([]);
-  
-  useEffect(() => {
-    fetch('/api/assessments/tests/', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-    .then(res => res.json())
-    .then(data => setTests(data.results));
-  }, []);
-
-  return (
-    <div>
-      {tests.map(test => (
-        <div key={test.id} className="test-card">
-          <h3>{test.title}</h3>
-          <p>{test.description}</p>
-          <p>Points: {test.total_points}</p>
-          <p>Time Limit: {test.time_limit_minutes} minutes</p>
-          <p>Status: {test.is_published ? 'Published' : 'Draft'}</p>
-          {test.can_attempt && (
-            <button onClick={() => startTest(test.id)}>
-              Start Test
-            </button>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-};
+#### Get Test Results
+```http
+GET /api/assessments/attempts/1/
+Authorization: Bearer <token>
 ```
 
-#### Question Component
-```javascript
-const QuestionComponent = ({ question, attemptId, onAnswerSubmit }) => {
-  const [selectedOptions, setSelectedOptions] = useState([]);
-  const [textAnswer, setTextAnswer] = useState('');
-  const [matchingAnswers, setMatchingAnswers] = useState([]);
-
-  const handleSubmit = () => {
-    let answerData = { question_id: question.id };
-    
-    if (question.type === 'multiple_choice' || question.type === 'choose_all') {
-      answerData.selected_option_ids = selectedOptions;
-    } else if (question.type === 'open_question') {
-      answerData.text_answer = textAnswer;
-    } else if (question.type === 'matching') {
-      answerData.matching_answers_json = matchingAnswers;
+**Response:**
+```json
+{
+  "id": 1,
+  "test": 1,
+  "student": 2,
+  "attempt_number": 1,
+  "started_at": "2024-01-10T10:00:00Z",
+  "submitted_at": "2024-01-10T10:25:00Z",
+  "score": 45,
+  "max_score": 50,
+  "percentage": 90.0,
+  "is_completed": true,
+  "is_graded": true,
+  "time_spent_minutes": 25.0,
+  "can_view_results": true,
+  "answers": [
+    {
+      "id": 1,
+      "question": 1,
+      "question_text": "What is 2 + 2?",
+      "question_type": "multiple_choice",
+      "question_points": 5,
+      "selected_options": [
+        { "id": 2, "text": "4", "is_correct": true }
+      ],
+      "score": 5,
+      "max_score": 5,
+      "is_correct": true,
+      "teacher_feedback": "Correct!"
+    },
+    {
+      "id": 2,
+      "question": 2,
+      "question_text": "Which are prime numbers?",
+      "question_type": "choose_all",
+      "question_points": 10,
+      "selected_options": [
+        { "id": 4, "text": "2", "is_correct": true },
+        { "id": 5, "text": "3", "is_correct": true },
+        { "id": 7, "text": "5", "is_correct": true }
+      ],
+      "score": 10,
+      "max_score": 10,
+      "is_correct": true
+    },
+    {
+      "id": 3,
+      "question": 3,
+      "question_text": "Explain photosynthesis",
+      "question_type": "open_question",
+      "question_points": 15,
+      "text_answer": "Photosynthesis is the process by which plants convert sunlight, water, and carbon dioxide into glucose and oxygen.",
+      "score": 12,
+      "max_score": 15,
+      "is_correct": false,
+      "teacher_feedback": "Good explanation, but you could mention chlorophyll."
+    },
+    {
+      "id": 4,
+      "question": 4,
+      "question_text": "Match countries with capitals",
+      "question_type": "matching",
+      "question_points": 20,
+      "matching_answers_json": [
+        { "left": "France", "right": "Paris" },
+        { "left": "Germany", "right": "Berlin" },
+        { "left": "Spain", "right": "Madrid" }
+      ],
+      "score": 20,
+      "max_score": 20,
+      "is_correct": true
     }
-    
-    onAnswerSubmit(attemptId, question.id, answerData);
-  };
-
-  return (
-    <div className="question">
-      <h4>{question.text}</h4>
-      <p>Points: {question.points}</p>
-      
-      {question.type === 'multiple_choice' && (
-        <div>
-          {question.options.map(option => (
-            <label key={option.id}>
-              <input
-                type="radio"
-                name={`question_${question.id}`}
-                value={option.id}
-                onChange={(e) => setSelectedOptions([parseInt(e.target.value)])}
-              />
-              {option.text}
-              {option.image_url && <img src={option.image_url} alt="Option" />}
-            </label>
-          ))}
-        </div>
-      )}
-      
-      {question.type === 'choose_all' && (
-        <div>
-          {question.options.map(option => (
-            <label key={option.id}>
-              <input
-                type="checkbox"
-                value={option.id}
-                onChange={(e) => {
-                  if (e.target.checked) {
-                    setSelectedOptions([...selectedOptions, option.id]);
-                  } else {
-                    setSelectedOptions(selectedOptions.filter(id => id !== option.id));
-                  }
-                }}
-              />
-              {option.text}
-              {option.image_url && <img src={option.image_url} alt="Option" />}
-            </label>
-          ))}
-        </div>
-      )}
-      
-      {question.type === 'open_question' && (
-        <textarea
-          value={textAnswer}
-          onChange={(e) => setTextAnswer(e.target.value)}
-          placeholder="Enter your answer..."
-          rows={5}
-        />
-      )}
-      
-      {question.type === 'matching' && (
-        <MatchingComponent
-          pairs={question.matching_pairs_json}
-          onAnswersChange={setMatchingAnswers}
-        />
-      )}
-      
-      <button onClick={handleSubmit}>Submit Answer</button>
-    </div>
-  );
-};
+  ]
+}
 ```
 
-#### Matching Component
-```javascript
-const MatchingComponent = ({ pairs, onAnswersChange }) => {
-  const [matches, setMatches] = useState([]);
-  
-  const leftItems = pairs.map(pair => pair.left);
-  const rightItems = pairs.map(pair => pair.right);
-  
-  const handleMatch = (leftItem, rightItem) => {
-    const newMatch = { left: leftItem, right: rightItem };
-    setMatches([...matches, newMatch]);
-    onAnswersChange([...matches, newMatch]);
-  };
-  
-  return (
-    <div className="matching-container">
-      <div className="left-column">
-        {leftItems.map((item, index) => (
-          <div key={index} className="match-item">
-            {item}
-          </div>
-        ))}
-      </div>
-      <div className="right-column">
-        {rightItems.map((item, index) => (
-          <div key={index} className="match-item">
-            {item}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-```
+### 4. Teacher: Grading Open Questions
 
-### 4. Test Timer Component
-```javascript
-const TestTimer = ({ timeLimitMinutes, onTimeUp }) => {
-  const [timeLeft, setTimeLeft] = useState(timeLimitMinutes * 60);
-  
-  useEffect(() => {
-    if (timeLeft <= 0) {
-      onTimeUp();
-      return;
-    }
-    
-    const timer = setTimeout(() => {
-      setTimeLeft(timeLeft - 1);
-    }, 1000);
-    
-    return () => clearTimeout(timer);
-  }, [timeLeft, onTimeUp]);
-  
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-  
-  return (
-    <div className={`timer ${timeLeft < 300 ? 'warning' : ''}`}>
-      Time Remaining: {formatTime(timeLeft)}
-    </div>
-  );
-};
-```
+#### Bulk Grade Answers
+```http
+POST /api/assessments/answers/bulk-grade/
+Content-Type: application/json
+Authorization: Bearer <token>
 
-### 5. Results Viewing
-```javascript
-const TestResults = ({ attemptId }) => {
-  const [attempt, setAttempt] = useState(null);
-  
-  useEffect(() => {
-    fetch(`/api/assessments/attempts/${attemptId}/`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-    .then(res => res.json())
-    .then(data => setAttempt(data));
-  }, [attemptId]);
-  
-  if (!attempt) return <div>Loading...</div>;
-  
-  return (
-    <div className="test-results">
-      <h2>Test Results</h2>
-      <p>Score: {attempt.score}/{attempt.max_score}</p>
-      <p>Percentage: {attempt.percentage}%</p>
-      <p>Time Spent: {attempt.time_spent_minutes} minutes</p>
-      
-      {attempt.answers.map(answer => (
-        <div key={answer.id} className="answer-result">
-          <h4>{answer.question_text}</h4>
-          <p>Your Answer: {answer.text_answer || answer.selected_options.map(opt => opt.text).join(', ')}</p>
-          <p>Score: {answer.score}/{answer.max_score}</p>
-          {answer.teacher_feedback && (
-            <p>Feedback: {answer.teacher_feedback}</p>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-};
-```
-
-### 6. Teacher Grading Interface
-```javascript
-const GradingInterface = ({ testId }) => {
-  const [answers, setAnswers] = useState([]);
-  
-  const gradeAnswer = async (answerId, score, feedback) => {
-    await fetch('/api/assessments/answers/bulk-grade/', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify([{
-        answer_id: answerId,
-        score: score,
-        teacher_feedback: feedback
-      }])
-    });
-  };
-  
-  return (
-    <div className="grading-interface">
-      {answers.map(answer => (
-        <div key={answer.id} className="grading-item">
-          <h4>{answer.question_text}</h4>
-          <p>Student Answer: {answer.text_answer}</p>
-          <input
-            type="number"
-            placeholder="Score"
-            onChange={(e) => setScore(answer.id, e.target.value)}
-          />
-          <textarea
-            placeholder="Feedback"
-            onChange={(e) => setFeedback(answer.id, e.target.value)}
-          />
-          <button onClick={() => gradeAnswer(answer.id, score, feedback)}>
-            Grade
-          </button>
-        </div>
-      ))}
-    </div>
-  );
-};
-```
-
-### 7. Key Frontend Considerations
-
-#### Error Handling
-```javascript
-const handleApiError = (error) => {
-  if (error.status === 401) {
-    // Redirect to login
-    window.location.href = '/login';
-  } else if (error.status === 403) {
-    // Show access denied message
-    alert('You do not have permission to access this resource');
-  } else if (error.status === 400) {
-    // Show validation errors
-    console.error('Validation errors:', error.detail);
+[
+  {
+    "answer_id": 3,
+    "score": 12,
+    "teacher_feedback": "Good explanation, but you could mention chlorophyll."
+  },
+  {
+    "answer_id": 5,
+    "score": 8,
+    "teacher_feedback": "Partially correct, but missing key details."
   }
-};
+]
 ```
 
-#### Real-time Updates
-```javascript
-// Use WebSocket or polling for real-time updates
-const useTestUpdates = (testId) => {
-  useEffect(() => {
-    const interval = setInterval(() => {
-      // Check for test updates
-      fetch(`/api/assessments/tests/${testId}/`)
-        .then(res => res.json())
-        .then(data => {
-          // Update UI with new data
-        });
-    }, 30000); // Poll every 30 seconds
-    
-    return () => clearInterval(interval);
-  }, [testId]);
-};
+### 5. List Operations
+
+#### Get All Tests (Filtered by User Role)
+```http
+GET /api/assessments/tests/
+Authorization: Bearer <token>
 ```
 
-#### State Management
-```javascript
-// Use Redux, Zustand, or Context for state management
-const useTestStore = create((set) => ({
-  currentTest: null,
-  currentAttempt: null,
-  answers: [],
-  setCurrentTest: (test) => set({ currentTest: test }),
-  addAnswer: (answer) => set((state) => ({
-    answers: [...state.answers, answer]
-  })),
-  updateAnswer: (answerId, updates) => set((state) => ({
-    answers: state.answers.map(answer =>
-      answer.id === answerId ? { ...answer, ...updates } : answer
-    )
-  }))
-}));
+**Response:**
+```json
+{
+  "count": 5,
+  "next": null,
+  "previous": null,
+  "results": [
+    {
+      "id": 1,
+      "course_section": 1,
+      "title": "Math Quiz",
+      "description": "Basic math concepts",
+      "is_published": true,
+      "total_points": 50,
+      "time_limit_minutes": 30,
+      "can_attempt": true,
+      "is_available": true,
+      "can_see_results": true,
+      "questions": [...]
+    }
+  ]
+}
 ```
 
-This comprehensive guide should help your frontend developer implement the complete test system with all question types, scoring, and management features!
+#### Get Questions for a Test
+```http
+GET /api/assessments/questions/?test=1
+Authorization: Bearer <token>
+```
+
+#### Get Student's Attempts
+```http
+GET /api/assessments/attempts/?student=2
+Authorization: Bearer <token>
+```
+
+#### Get Answers for Grading
+```http
+GET /api/assessments/answers/?attempt__test=1&question__type=open_question
+Authorization: Bearer <token>
+```
+
+### 6. Test Management
+
+#### Update Test Settings
+```http
+PATCH /api/assessments/tests/1/
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{
+  "time_limit_minutes": 45,
+  "max_attempts": 2,
+  "show_score_immediately": true
+}
+```
+
+#### Unpublish Test
+```http
+POST /api/assessments/tests/1/unpublish/
+Authorization: Bearer <token>
+```
+
+#### Mark Results as Viewed
+```http
+POST /api/assessments/attempts/1/view-results/
+Authorization: Bearer <token>
+```
+
+### 7. Filtering and Search
+
+#### Filter Tests by Course Section
+```http
+GET /api/assessments/tests/?course_section=1
+Authorization: Bearer <token>
+```
+
+#### Filter Questions by Type
+```http
+GET /api/assessments/questions/?type=multiple_choice
+Authorization: Bearer <token>
+```
+
+#### Search Tests by Title
+```http
+GET /api/assessments/tests/?search=math
+Authorization: Bearer <token>
+```
+
+#### Filter Attempts by Status
+```http
+GET /api/assessments/attempts/?is_completed=true
+Authorization: Bearer <token>
+```
 
 ## 📅 Calendar
 
