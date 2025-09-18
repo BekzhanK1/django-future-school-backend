@@ -276,60 +276,566 @@ POST   /api/grades/bulk-grade/
 ]
 ```
 
-## 🧪 Assessments (Tests)
+## 🧪 Assessments (Tests) - Complete Frontend Guide
 
-### Tests
+### Overview
+The test system supports 4 question types with automatic scoring, time limits, multiple attempts, and controlled result visibility.
+
+### Question Types
+- **Multiple Choice** - Single correct answer
+- **Choose All That Apply** - Multiple correct answers with partial credit
+- **Open Questions** - Text answers requiring manual grading
+- **Matching Items** - Match items from two lists
+
+### Tests API
 ```http
-GET    /api/tests/                      # List tests
-POST   /api/tests/                      # Create test
-GET    /api/tests/{id}/                 # Get test with questions
-PUT    /api/tests/{id}/                 # Update test
-DELETE /api/tests/{id}/                 # Delete test
+GET    /api/assessments/tests/          # List tests (filtered by user role)
+POST   /api/assessments/tests/          # Create test with questions
+GET    /api/assessments/tests/{id}/     # Get test with questions & options
+PUT    /api/assessments/tests/{id}/     # Update test
+DELETE /api/assessments/tests/{id}/     # Delete test
 
 # Test management
-POST   /api/tests/{id}/publish/         # Publish test
-POST   /api/tests/{id}/unpublish/       # Unpublish test
+POST   /api/assessments/tests/{id}/publish/    # Publish test
+POST   /api/assessments/tests/{id}/unpublish/  # Unpublish test
 ```
 
-### Questions
+### Questions API
 ```http
-GET    /api/questions/                  # List questions
-POST   /api/questions/                  # Create question
-GET    /api/questions/{id}/             # Get question details
-PUT    /api/questions/{id}/             # Update question
-DELETE /api/questions/{id}/             # Delete question
+GET    /api/assessments/questions/      # List questions
+POST   /api/assessments/questions/      # Create question with options
+GET    /api/assessments/questions/{id}/ # Get question with options
+PUT    /api/assessments/questions/{id}/ # Update question
+DELETE /api/assessments/questions/{id}/ # Delete question
 ```
 
-### Test Attempts
+### Options API
 ```http
-GET    /api/attempts/                   # List attempts
-POST   /api/attempts/start/             # Start new attempt
-GET    /api/attempts/{id}/              # Get attempt with answers
-POST   /api/attempts/{id}/submit/       # Submit attempt
-POST   /api/attempts/{id}/submit-answer/ # Submit answer for question
+GET    /api/assessments/options/        # List options
+POST   /api/assessments/options/        # Create option
+GET    /api/assessments/options/{id}/   # Get option details
+PUT    /api/assessments/options/{id}/   # Update option
+DELETE /api/assessments/options/{id}/   # Delete option
 ```
 
-### Test Answers
+### Test Attempts API
 ```http
-GET    /api/answers/                    # List answers
-POST   /api/answers/                    # Create answer
-GET    /api/answers/{id}/               # Get answer details
-PUT    /api/answers/{id}/               # Update answer
-DELETE /api/answers/{id}/               # Delete answer
+GET    /api/assessments/attempts/       # List attempts (filtered by user role)
+POST   /api/assessments/attempts/start/ # Start new test attempt
+GET    /api/assessments/attempts/{id}/  # Get attempt with answers
+POST   /api/assessments/attempts/{id}/submit/        # Submit completed attempt
+POST   /api/assessments/attempts/{id}/submit-answer/ # Submit answer for question
+POST   /api/assessments/attempts/{id}/view-results/  # Mark results as viewed
+```
+
+### Test Answers API
+```http
+GET    /api/assessments/answers/        # List answers (filtered by user role)
+GET    /api/assessments/answers/{id}/   # Get answer details
+PUT    /api/assessments/answers/{id}/   # Update answer
 
 # Bulk grade answers (for open questions)
-POST   /api/answers/bulk-grade/
+POST   /api/assessments/answers/bulk-grade/
 [
   {
     "answer_id": 1,
-    "score": 8
-  },
-  {
-    "answer_id": 2,
-    "score": 10
+    "score": 8.5,
+    "teacher_feedback": "Good work!"
   }
 ]
 ```
+
+## 🎯 Frontend Integration Guide for Tests
+
+### 1. Teacher: Creating Tests
+
+#### Create Test with Questions
+```javascript
+// POST /api/assessments/tests/
+const createTest = async (testData) => {
+  const response = await fetch('/api/assessments/tests/', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      course_section: 1,
+      title: "Math Quiz",
+      description: "Basic math concepts",
+      time_limit_minutes: 30,
+      allow_multiple_attempts: true,
+      max_attempts: 3,
+      show_correct_answers: true,
+      show_feedback: true,
+      show_score_immediately: false,
+      reveal_results_at: "2024-01-15T10:00:00Z",
+      questions: [
+        {
+          type: "multiple_choice",
+          text: "What is 2 + 2?",
+          points: 5,
+          position: 1,
+          options: [
+            { text: "3", is_correct: false, position: 1 },
+            { text: "4", is_correct: true, position: 2 },
+            { text: "5", is_correct: false, position: 3 }
+          ]
+        },
+        {
+          type: "choose_all",
+          text: "Which are prime numbers?",
+          points: 10,
+          position: 2,
+          options: [
+            { text: "2", is_correct: true, position: 1 },
+            { text: "3", is_correct: true, position: 2 },
+            { text: "4", is_correct: false, position: 3 },
+            { text: "5", is_correct: true, position: 4 }
+          ]
+        },
+        {
+          type: "open_question",
+          text: "Explain photosynthesis",
+          points: 15,
+          position: 3,
+          correct_answer_text: "Process by which plants convert sunlight to energy",
+          sample_answer: "Plants use sunlight, water, and CO2 to create glucose"
+        },
+        {
+          type: "matching",
+          text: "Match countries with capitals",
+          points: 20,
+          position: 4,
+          matching_pairs_json: [
+            { left: "France", right: "Paris" },
+            { left: "Germany", right: "Berlin" },
+            { left: "Spain", right: "Madrid" }
+          ]
+        }
+      ]
+    })
+  });
+  return response.json();
+};
+```
+
+#### Add Questions to Existing Test
+```javascript
+// POST /api/assessments/questions/
+const addQuestion = async (testId, questionData) => {
+  const response = await fetch('/api/assessments/questions/', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      test: testId,
+      type: "multiple_choice",
+      text: "What is the capital of France?",
+      points: 10,
+      position: 5,
+      options: [
+        { text: "London", is_correct: false, position: 1 },
+        { text: "Paris", is_correct: true, position: 2 },
+        { text: "Berlin", is_correct: false, position: 3 }
+      ]
+    })
+  });
+  return response.json();
+};
+```
+
+### 2. Student: Taking Tests
+
+#### Start Test Attempt
+```javascript
+// POST /api/assessments/attempts/start/
+const startTest = async (testId) => {
+  const response = await fetch('/api/assessments/attempts/start/', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ test_id: testId })
+  });
+  return response.json();
+};
+```
+
+#### Submit Answer for Question
+```javascript
+// POST /api/assessments/attempts/{id}/submit-answer/
+const submitAnswer = async (attemptId, questionId, answerData) => {
+  const response = await fetch(`/api/assessments/attempts/${attemptId}/submit-answer/`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      question_id: questionId,
+      // For multiple choice
+      selected_option_ids: [2, 3],
+      // For open questions
+      text_answer: "My detailed answer here",
+      // For matching questions
+      matching_answers_json: [
+        { left: "France", right: "Paris" },
+        { left: "Germany", right: "Berlin" }
+      ]
+    })
+  });
+  return response.json();
+};
+```
+
+#### Submit Completed Test
+```javascript
+// POST /api/assessments/attempts/{id}/submit/
+const submitTest = async (attemptId) => {
+  const response = await fetch(`/api/assessments/attempts/${attemptId}/submit/`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    }
+  });
+  return response.json();
+};
+```
+
+### 3. Frontend UI Components
+
+#### Test List Component
+```javascript
+const TestList = () => {
+  const [tests, setTests] = useState([]);
+  
+  useEffect(() => {
+    fetch('/api/assessments/tests/', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    .then(res => res.json())
+    .then(data => setTests(data.results));
+  }, []);
+
+  return (
+    <div>
+      {tests.map(test => (
+        <div key={test.id} className="test-card">
+          <h3>{test.title}</h3>
+          <p>{test.description}</p>
+          <p>Points: {test.total_points}</p>
+          <p>Time Limit: {test.time_limit_minutes} minutes</p>
+          <p>Status: {test.is_published ? 'Published' : 'Draft'}</p>
+          {test.can_attempt && (
+            <button onClick={() => startTest(test.id)}>
+              Start Test
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+};
+```
+
+#### Question Component
+```javascript
+const QuestionComponent = ({ question, attemptId, onAnswerSubmit }) => {
+  const [selectedOptions, setSelectedOptions] = useState([]);
+  const [textAnswer, setTextAnswer] = useState('');
+  const [matchingAnswers, setMatchingAnswers] = useState([]);
+
+  const handleSubmit = () => {
+    let answerData = { question_id: question.id };
+    
+    if (question.type === 'multiple_choice' || question.type === 'choose_all') {
+      answerData.selected_option_ids = selectedOptions;
+    } else if (question.type === 'open_question') {
+      answerData.text_answer = textAnswer;
+    } else if (question.type === 'matching') {
+      answerData.matching_answers_json = matchingAnswers;
+    }
+    
+    onAnswerSubmit(attemptId, question.id, answerData);
+  };
+
+  return (
+    <div className="question">
+      <h4>{question.text}</h4>
+      <p>Points: {question.points}</p>
+      
+      {question.type === 'multiple_choice' && (
+        <div>
+          {question.options.map(option => (
+            <label key={option.id}>
+              <input
+                type="radio"
+                name={`question_${question.id}`}
+                value={option.id}
+                onChange={(e) => setSelectedOptions([parseInt(e.target.value)])}
+              />
+              {option.text}
+              {option.image_url && <img src={option.image_url} alt="Option" />}
+            </label>
+          ))}
+        </div>
+      )}
+      
+      {question.type === 'choose_all' && (
+        <div>
+          {question.options.map(option => (
+            <label key={option.id}>
+              <input
+                type="checkbox"
+                value={option.id}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setSelectedOptions([...selectedOptions, option.id]);
+                  } else {
+                    setSelectedOptions(selectedOptions.filter(id => id !== option.id));
+                  }
+                }}
+              />
+              {option.text}
+              {option.image_url && <img src={option.image_url} alt="Option" />}
+            </label>
+          ))}
+        </div>
+      )}
+      
+      {question.type === 'open_question' && (
+        <textarea
+          value={textAnswer}
+          onChange={(e) => setTextAnswer(e.target.value)}
+          placeholder="Enter your answer..."
+          rows={5}
+        />
+      )}
+      
+      {question.type === 'matching' && (
+        <MatchingComponent
+          pairs={question.matching_pairs_json}
+          onAnswersChange={setMatchingAnswers}
+        />
+      )}
+      
+      <button onClick={handleSubmit}>Submit Answer</button>
+    </div>
+  );
+};
+```
+
+#### Matching Component
+```javascript
+const MatchingComponent = ({ pairs, onAnswersChange }) => {
+  const [matches, setMatches] = useState([]);
+  
+  const leftItems = pairs.map(pair => pair.left);
+  const rightItems = pairs.map(pair => pair.right);
+  
+  const handleMatch = (leftItem, rightItem) => {
+    const newMatch = { left: leftItem, right: rightItem };
+    setMatches([...matches, newMatch]);
+    onAnswersChange([...matches, newMatch]);
+  };
+  
+  return (
+    <div className="matching-container">
+      <div className="left-column">
+        {leftItems.map((item, index) => (
+          <div key={index} className="match-item">
+            {item}
+          </div>
+        ))}
+      </div>
+      <div className="right-column">
+        {rightItems.map((item, index) => (
+          <div key={index} className="match-item">
+            {item}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+```
+
+### 4. Test Timer Component
+```javascript
+const TestTimer = ({ timeLimitMinutes, onTimeUp }) => {
+  const [timeLeft, setTimeLeft] = useState(timeLimitMinutes * 60);
+  
+  useEffect(() => {
+    if (timeLeft <= 0) {
+      onTimeUp();
+      return;
+    }
+    
+    const timer = setTimeout(() => {
+      setTimeLeft(timeLeft - 1);
+    }, 1000);
+    
+    return () => clearTimeout(timer);
+  }, [timeLeft, onTimeUp]);
+  
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+  
+  return (
+    <div className={`timer ${timeLeft < 300 ? 'warning' : ''}`}>
+      Time Remaining: {formatTime(timeLeft)}
+    </div>
+  );
+};
+```
+
+### 5. Results Viewing
+```javascript
+const TestResults = ({ attemptId }) => {
+  const [attempt, setAttempt] = useState(null);
+  
+  useEffect(() => {
+    fetch(`/api/assessments/attempts/${attemptId}/`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    .then(res => res.json())
+    .then(data => setAttempt(data));
+  }, [attemptId]);
+  
+  if (!attempt) return <div>Loading...</div>;
+  
+  return (
+    <div className="test-results">
+      <h2>Test Results</h2>
+      <p>Score: {attempt.score}/{attempt.max_score}</p>
+      <p>Percentage: {attempt.percentage}%</p>
+      <p>Time Spent: {attempt.time_spent_minutes} minutes</p>
+      
+      {attempt.answers.map(answer => (
+        <div key={answer.id} className="answer-result">
+          <h4>{answer.question_text}</h4>
+          <p>Your Answer: {answer.text_answer || answer.selected_options.map(opt => opt.text).join(', ')}</p>
+          <p>Score: {answer.score}/{answer.max_score}</p>
+          {answer.teacher_feedback && (
+            <p>Feedback: {answer.teacher_feedback}</p>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+};
+```
+
+### 6. Teacher Grading Interface
+```javascript
+const GradingInterface = ({ testId }) => {
+  const [answers, setAnswers] = useState([]);
+  
+  const gradeAnswer = async (answerId, score, feedback) => {
+    await fetch('/api/assessments/answers/bulk-grade/', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify([{
+        answer_id: answerId,
+        score: score,
+        teacher_feedback: feedback
+      }])
+    });
+  };
+  
+  return (
+    <div className="grading-interface">
+      {answers.map(answer => (
+        <div key={answer.id} className="grading-item">
+          <h4>{answer.question_text}</h4>
+          <p>Student Answer: {answer.text_answer}</p>
+          <input
+            type="number"
+            placeholder="Score"
+            onChange={(e) => setScore(answer.id, e.target.value)}
+          />
+          <textarea
+            placeholder="Feedback"
+            onChange={(e) => setFeedback(answer.id, e.target.value)}
+          />
+          <button onClick={() => gradeAnswer(answer.id, score, feedback)}>
+            Grade
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+};
+```
+
+### 7. Key Frontend Considerations
+
+#### Error Handling
+```javascript
+const handleApiError = (error) => {
+  if (error.status === 401) {
+    // Redirect to login
+    window.location.href = '/login';
+  } else if (error.status === 403) {
+    // Show access denied message
+    alert('You do not have permission to access this resource');
+  } else if (error.status === 400) {
+    // Show validation errors
+    console.error('Validation errors:', error.detail);
+  }
+};
+```
+
+#### Real-time Updates
+```javascript
+// Use WebSocket or polling for real-time updates
+const useTestUpdates = (testId) => {
+  useEffect(() => {
+    const interval = setInterval(() => {
+      // Check for test updates
+      fetch(`/api/assessments/tests/${testId}/`)
+        .then(res => res.json())
+        .then(data => {
+          // Update UI with new data
+        });
+    }, 30000); // Poll every 30 seconds
+    
+    return () => clearInterval(interval);
+  }, [testId]);
+};
+```
+
+#### State Management
+```javascript
+// Use Redux, Zustand, or Context for state management
+const useTestStore = create((set) => ({
+  currentTest: null,
+  currentAttempt: null,
+  answers: [],
+  setCurrentTest: (test) => set({ currentTest: test }),
+  addAnswer: (answer) => set((state) => ({
+    answers: [...state.answers, answer]
+  })),
+  updateAnswer: (answerId, updates) => set((state) => ({
+    answers: state.answers.map(answer =>
+      answer.id === answerId ? { ...answer, ...updates } : answer
+    )
+  }))
+}));
+```
+
+This comprehensive guide should help your frontend developer implement the complete test system with all question types, scoring, and management features!
 
 ## 📅 Calendar
 

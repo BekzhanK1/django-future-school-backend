@@ -1,31 +1,57 @@
 from rest_framework import serializers
 from django.utils import timezone
-from .models import Test, Question, Attempt, Answer
+from .models import Test, Question, Option, Attempt, Answer, QuestionType
+
+
+class OptionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Option
+        fields = ['id', 'text', 'image_url', 'is_correct', 'position']
+        read_only_fields = ['id']
 
 
 class QuestionSerializer(serializers.ModelSerializer):
+    options = OptionSerializer(many=True, read_only=True)
+    options_count = serializers.SerializerMethodField()
+    
     class Meta:
         model = Question
-        fields = ['id', 'test', 'type', 'text', 'options_json', 'correct_json', 'points', 'position']
+        fields = [
+            'id', 'test', 'type', 'text', 'points', 'position',
+            'correct_answer_text', 'sample_answer', 'matching_pairs_json',
+            'options', 'options_count'
+        ]
+        read_only_fields = ['id']
+    
+    def get_options_count(self, obj):
+        return obj.options.count()
 
 
 class TestSerializer(serializers.ModelSerializer):
     questions = QuestionSerializer(many=True, read_only=True)
-    course_name = serializers.CharField(source='course.name', read_only=True)
-    course_code = serializers.CharField(source='course.course_code', read_only=True)
+    course_section_title = serializers.CharField(source='course_section.title', read_only=True)
+    course_name = serializers.CharField(source='course_section.subject_group.course.name', read_only=True)
+    course_code = serializers.CharField(source='course_section.subject_group.course.course_code', read_only=True)
     teacher_username = serializers.CharField(source='teacher.username', read_only=True)
     teacher_first_name = serializers.CharField(source='teacher.first_name', read_only=True)
     teacher_last_name = serializers.CharField(source='teacher.last_name', read_only=True)
+    total_points = serializers.ReadOnlyField()
     attempt_count = serializers.SerializerMethodField()
     is_available = serializers.SerializerMethodField()
     can_see_results = serializers.SerializerMethodField()
+    can_attempt = serializers.SerializerMethodField()
     
     class Meta:
         model = Test
-        fields = ['id', 'course', 'teacher', 'title', 'description', 'is_published', 
-                 'scheduled_at', 'reveal_results_at', 'course_name', 'course_code', 
-                 'teacher_username', 'teacher_first_name', 'teacher_last_name', 
-                 'attempt_count', 'is_available', 'can_see_results', 'questions']
+        fields = [
+            'id', 'course_section', 'teacher', 'title', 'description', 'is_published',
+            'scheduled_at', 'reveal_results_at', 'time_limit_minutes', 'allow_multiple_attempts',
+            'max_attempts', 'show_correct_answers', 'show_feedback', 'show_score_immediately',
+            'course_section_title', 'course_name', 'course_code', 'teacher_username',
+            'teacher_first_name', 'teacher_last_name', 'total_points', 'attempt_count',
+            'is_available', 'can_see_results', 'can_attempt', 'questions', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
     
     def get_attempt_count(self, obj):
         return obj.attempts.count()
@@ -41,6 +67,26 @@ class TestSerializer(serializers.ModelSerializer):
         if not obj.reveal_results_at:
             return True
         return obj.reveal_results_at <= timezone.now()
+    
+    def get_can_attempt(self, obj):
+        if not self.get_is_available(obj):
+            return False
+        
+        request = self.context.get('request')
+        if not request or not hasattr(request, 'user'):
+            return False
+        
+        user = request.user
+        if user.role != 'student':
+            return False
+        
+        # Check if student has reached max attempts
+        if obj.max_attempts:
+            current_attempts = obj.attempts.filter(student=user).count()
+            if current_attempts >= obj.max_attempts:
+                return False
+        
+        return True
 
 
 class AttemptSerializer(serializers.ModelSerializer):
@@ -50,12 +96,19 @@ class AttemptSerializer(serializers.ModelSerializer):
     student_last_name = serializers.CharField(source='student.last_name', read_only=True)
     test_title = serializers.CharField(source='test.title', read_only=True)
     answers = serializers.SerializerMethodField()
+    can_view_results = serializers.ReadOnlyField()
+    time_spent_minutes = serializers.ReadOnlyField()
+    percentage = serializers.ReadOnlyField()
     
     class Meta:
         model = Attempt
-        fields = ['id', 'test', 'student', 'started_at', 'submitted_at', 'graded_at',
-                 'score', 'max_score', 'student_username', 'student_email', 'student_first_name', 
-                 'student_last_name', 'test_title', 'answers']
+        fields = [
+            'id', 'test', 'student', 'attempt_number', 'started_at', 'submitted_at', 'graded_at',
+            'score', 'max_score', 'percentage', 'is_completed', 'is_graded', 'results_viewed_at',
+            'student_username', 'student_email', 'student_first_name', 'student_last_name',
+            'test_title', 'can_view_results', 'time_spent_minutes', 'answers'
+        ]
+        read_only_fields = ['id', 'attempt_number', 'started_at', 'submitted_at', 'graded_at', 'score', 'max_score', 'percentage', 'is_completed', 'is_graded', 'results_viewed_at']
     
     def get_answers(self, obj):
         answers = obj.answers.all().order_by('question__position')
@@ -66,11 +119,18 @@ class AnswerSerializer(serializers.ModelSerializer):
     question_text = serializers.CharField(source='question.text', read_only=True)
     question_type = serializers.CharField(source='question.type', read_only=True)
     question_points = serializers.IntegerField(source='question.points', read_only=True)
+    selected_options = OptionSerializer(many=True, read_only=True)
+    max_score = serializers.ReadOnlyField()
+    is_correct = serializers.ReadOnlyField()
     
     class Meta:
         model = Answer
-        fields = ['id', 'attempt', 'question', 'selected_json', 'text_answer', 
-                 'match_json', 'score', 'question_text', 'question_type', 'question_points']
+        fields = [
+            'id', 'attempt', 'question', 'selected_options', 'text_answer', 'matching_answers_json',
+            'score', 'max_score', 'is_correct', 'teacher_feedback', 'auto_feedback',
+            'question_text', 'question_type', 'question_points', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
 
 
 class CreateAttemptSerializer(serializers.Serializer):
@@ -88,6 +148,13 @@ class CreateAttemptSerializer(serializers.Serializer):
         if test.scheduled_at and test.scheduled_at > timezone.now():
             raise serializers.ValidationError("Test is not yet available")
         
+        # Check if student has reached max attempts
+        student = self.context['request'].user
+        if test.max_attempts:
+            current_attempts = test.attempts.filter(student=student).count()
+            if current_attempts >= test.max_attempts:
+                raise serializers.ValidationError("Maximum attempts reached")
+        
         return value
     
     def create(self, validated_data):
@@ -104,18 +171,30 @@ class CreateAttemptSerializer(serializers.Serializer):
         if existing_attempt:
             return existing_attempt
         
+        # Get next attempt number
+        last_attempt = Attempt.objects.filter(
+            test_id=test_id, 
+            student=student
+        ).order_by('-attempt_number').first()
+        
+        attempt_number = (last_attempt.attempt_number + 1) if last_attempt else 1
+        
         return Attempt.objects.create(
             test_id=test_id,
             student=student,
-            started_at=timezone.now()
+            attempt_number=attempt_number
         )
 
 
 class SubmitAnswerSerializer(serializers.Serializer):
     question_id = serializers.IntegerField()
-    selected_json = serializers.CharField(required=False, allow_blank=True)
+    selected_option_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        allow_empty=True
+    )
     text_answer = serializers.CharField(required=False, allow_blank=True)
-    match_json = serializers.CharField(required=False, allow_blank=True)
+    matching_answers_json = serializers.JSONField(required=False, allow_null=True)
     
     def validate_question_id(self, value):
         try:
@@ -123,11 +202,26 @@ class SubmitAnswerSerializer(serializers.Serializer):
         except Question.DoesNotExist:
             raise serializers.ValidationError("Question does not exist")
         return value
+    
+    def validate_selected_option_ids(self, value):
+        if value:
+            # Validate that all option IDs exist and belong to the question
+            question_id = self.initial_data.get('question_id')
+            if question_id:
+                valid_options = Option.objects.filter(
+                    question_id=question_id,
+                    id__in=value
+                ).values_list('id', flat=True)
+                invalid_ids = set(value) - set(valid_options)
+                if invalid_ids:
+                    raise serializers.ValidationError(f"Invalid option IDs: {list(invalid_ids)}")
+        return value
 
 
 class BulkGradeAnswersSerializer(serializers.Serializer):
     answer_id = serializers.IntegerField()
-    score = serializers.IntegerField(required=False, allow_null=True)
+    score = serializers.FloatField(required=False, allow_null=True)
+    teacher_feedback = serializers.CharField(required=False, allow_blank=True)
     
     def validate_answer_id(self, value):
         try:
@@ -135,3 +229,54 @@ class BulkGradeAnswersSerializer(serializers.Serializer):
         except Answer.DoesNotExist:
             raise serializers.ValidationError("Answer does not exist")
         return value
+
+
+class ViewResultsSerializer(serializers.Serializer):
+    """Serializer for marking results as viewed by student"""
+    pass
+
+
+class CreateQuestionSerializer(serializers.ModelSerializer):
+    options = OptionSerializer(many=True, required=False)
+    
+    class Meta:
+        model = Question
+        fields = [
+            'test', 'type', 'text', 'points', 'position',
+            'correct_answer_text', 'sample_answer', 'matching_pairs_json', 'options'
+        ]
+    
+    def create(self, validated_data):
+        options_data = validated_data.pop('options', [])
+        question = Question.objects.create(**validated_data)
+        
+        for option_data in options_data:
+            Option.objects.create(question=question, **option_data)
+        
+        return question
+
+
+class CreateTestSerializer(serializers.ModelSerializer):
+    questions = CreateQuestionSerializer(many=True, required=False)
+    
+    class Meta:
+        model = Test
+        fields = [
+            'course_section', 'title', 'description', 'is_published',
+            'scheduled_at', 'reveal_results_at', 'time_limit_minutes',
+            'allow_multiple_attempts', 'max_attempts', 'show_correct_answers',
+            'show_feedback', 'show_score_immediately', 'questions'
+        ]
+    
+    def create(self, validated_data):
+        questions_data = validated_data.pop('questions', [])
+        test = Test.objects.create(**validated_data)
+        
+        for question_data in questions_data:
+            options_data = question_data.pop('options', [])
+            question = Question.objects.create(test=test, **question_data)
+            
+            for option_data in options_data:
+                Option.objects.create(question=question, **option_data)
+        
+        return test

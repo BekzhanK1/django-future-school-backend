@@ -5,11 +5,13 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.utils import timezone
 from django.db.models import Sum, Q
+from django.db import transaction
 
-from .models import Test, Question, Attempt, Answer
+from .models import Test, Question, Option, Attempt, Answer, QuestionType
 from .serializers import (
-    TestSerializer, QuestionSerializer, AttemptSerializer, AnswerSerializer,
-    CreateAttemptSerializer, SubmitAnswerSerializer, BulkGradeAnswersSerializer
+    TestSerializer, QuestionSerializer, OptionSerializer, AttemptSerializer, AnswerSerializer,
+    CreateAttemptSerializer, SubmitAnswerSerializer, BulkGradeAnswersSerializer,
+    ViewResultsSerializer, CreateQuestionSerializer, CreateTestSerializer
 )
 from schools.permissions import IsSuperAdmin, IsSchoolAdminOrSuperAdmin, IsTeacherOrAbove
 from learning.role_permissions import RoleBasedPermission
@@ -17,14 +19,23 @@ from users.models import UserRole
 
 
 class TestViewSet(viewsets.ModelViewSet):
-    queryset = Test.objects.select_related('course', 'teacher').prefetch_related('questions').all()
+    queryset = Test.objects.select_related(
+        'course_section__subject_group__course',
+        'course_section__subject_group__classroom__school',
+        'teacher'
+    ).prefetch_related('questions__options').all()
     serializer_class = TestSerializer
     permission_classes = [RoleBasedPermission]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['course', 'teacher', 'is_published']
+    filterset_fields = ['course_section', 'teacher', 'is_published', 'allow_multiple_attempts']
     search_fields = ['title', 'description']
-    ordering_fields = ['scheduled_at', 'title', 'created_at']
+    ordering_fields = ['scheduled_at', 'title', 'created_at', 'total_points']
     ordering = ['-scheduled_at', '-created_at']
+    
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return CreateTestSerializer
+        return TestSerializer
     
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -32,14 +43,18 @@ class TestViewSet(viewsets.ModelViewSet):
         
         # Students can only see tests for their courses
         if user.role == UserRole.STUDENT:
-            student_courses = user.classroom_users.values_list('classroom__subject_groups__course', flat=True)
-            queryset = queryset.filter(course__in=student_courses)
+            student_course_sections = user.classroom_users.values_list(
+                'classroom__subject_groups__sections', flat=True
+            )
+            queryset = queryset.filter(course_section__in=student_course_sections)
         # Teachers can see tests they created
         elif user.role == UserRole.TEACHER:
             queryset = queryset.filter(teacher=user)
         # School admins can see tests from their school
         elif user.role == UserRole.SCHOOLADMIN:
-            queryset = queryset.filter(course__subject_groups__classroom__school=user.school)
+            queryset = queryset.filter(
+                course_section__subject_group__classroom__school=user.school
+            )
         # Superadmins can see all tests (default queryset)
         
         return queryset
@@ -63,8 +78,19 @@ class TestViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
+class OptionViewSet(viewsets.ModelViewSet):
+    queryset = Option.objects.select_related('question__test').all()
+    serializer_class = OptionSerializer
+    permission_classes = [IsTeacherOrAbove]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['question', 'is_correct']
+    search_fields = ['text']
+    ordering_fields = ['position']
+    ordering = ['position', 'id']
+
+
 class QuestionViewSet(viewsets.ModelViewSet):
-    queryset = Question.objects.select_related('test').all()
+    queryset = Question.objects.select_related('test').prefetch_related('options').all()
     serializer_class = QuestionSerializer
     permission_classes = [IsTeacherOrAbove]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -72,16 +98,24 @@ class QuestionViewSet(viewsets.ModelViewSet):
     search_fields = ['text']
     ordering_fields = ['position', 'points']
     ordering = ['position', 'id']
+    
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return CreateQuestionSerializer
+        return QuestionSerializer
 
 
 class AttemptViewSet(viewsets.ModelViewSet):
-    queryset = Attempt.objects.select_related('test', 'student').prefetch_related('answers').all()
+    queryset = Attempt.objects.select_related(
+        'test__course_section__subject_group__course',
+        'student'
+    ).prefetch_related('answers__question', 'answers__selected_options').all()
     serializer_class = AttemptSerializer
     permission_classes = [RoleBasedPermission]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['test', 'student']
-    search_fields = ['student__username', 'student__email']
-    ordering_fields = ['started_at', 'submitted_at', 'score']
+    filterset_fields = ['test', 'student', 'is_completed', 'is_graded']
+    search_fields = ['student__username', 'student__email', 'test__title']
+    ordering_fields = ['started_at', 'submitted_at', 'score', 'attempt_number']
     ordering = ['-submitted_at', '-started_at']
     
     def get_queryset(self):
@@ -96,7 +130,9 @@ class AttemptViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(test__teacher=user)
         # School admins can see attempts from their school
         elif user.role == UserRole.SCHOOLADMIN:
-            queryset = queryset.filter(student__school=user.school)
+            queryset = queryset.filter(
+                test__course_section__subject_group__classroom__school=user.school
+            )
         # Superadmins can see all attempts (default queryset)
         
         return queryset
@@ -119,27 +155,43 @@ class AttemptViewSet(viewsets.ModelViewSet):
         if attempt.submitted_at:
             return Response({'error': 'Attempt already submitted'}, status=status.HTTP_400_BAD_REQUEST)
         
-        # Auto-grade multiple choice questions
-        total_score = 0
-        max_score = 0
-        
-        for answer in attempt.answers.all():
-            question = answer.question
-            max_score += question.points
+        with transaction.atomic():
+            # Auto-grade questions that can be auto-graded
+            total_score = 0
+            max_score = 0
             
-            if question.type in ['single_choice', 'multiple_choice']:
-                # Auto-grade based on correct_json
-                if answer.selected_json == question.correct_json:
-                    answer.score = question.points
-                    total_score += question.points
+            for answer in attempt.answers.all():
+                question = answer.question
+                max_score += question.points
+                
+                # Calculate score based on question type
+                calculated_score = answer.calculate_score()
+                if calculated_score is not None:
+                    answer.score = calculated_score
+                    answer.max_score = question.points
+                    answer.is_correct = (calculated_score == question.points)
+                    total_score += calculated_score
                 else:
-                    answer.score = 0
+                    # Open questions need manual grading
+                    answer.max_score = question.points
+                    answer.is_correct = None
+                
                 answer.save()
-        
-        attempt.submitted_at = timezone.now()
-        attempt.score = total_score
-        attempt.max_score = max_score
-        attempt.save()
+            
+            # Update attempt
+            attempt.submitted_at = timezone.now()
+            attempt.score = total_score
+            attempt.max_score = max_score
+            attempt.is_completed = True
+            attempt.is_graded = all(
+                answer.score is not None for answer in attempt.answers.all()
+            )
+            attempt.save()
+            
+            # Calculate percentage
+            if max_score > 0:
+                attempt.percentage = (total_score / max_score) * 100
+                attempt.save()
         
         serializer = self.get_serializer(attempt)
         return Response(serializer.data)
@@ -163,29 +215,64 @@ class AttemptViewSet(viewsets.ModelViewSet):
             
             answer, created = Answer.objects.get_or_create(
                 attempt=attempt,
-                question=question,
-                defaults=serializer.validated_data
+                question=question
             )
             
-            if not created:
-                for field, value in serializer.validated_data.items():
+            # Update answer fields
+            for field, value in serializer.validated_data.items():
+                if field != 'question_id':
                     setattr(answer, field, value)
-                answer.save()
+            
+            # Handle selected options for multiple choice questions
+            if 'selected_option_ids' in serializer.validated_data:
+                selected_option_ids = serializer.validated_data['selected_option_ids']
+                if selected_option_ids:
+                    selected_options = Option.objects.filter(
+                        id__in=selected_option_ids,
+                        question=question
+                    )
+                    answer.selected_options.set(selected_options)
+                else:
+                    answer.selected_options.clear()
+            
+            answer.save()
             
             response_serializer = AnswerSerializer(answer)
             return Response(response_serializer.data, status=status.HTTP_201_CREATED)
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    @action(detail=True, methods=['post'], url_path='view-results')
+    def view_results(self, request, pk=None):
+        """Mark results as viewed by student"""
+        attempt = self.get_object()
+        
+        if attempt.student != request.user:
+            return Response({'error': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
+        
+        if not attempt.can_view_results:
+            return Response({'error': 'Results not yet available'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if not attempt.results_viewed_at:
+            attempt.results_viewed_at = timezone.now()
+            attempt.save()
+        
+        serializer = self.get_serializer(attempt)
+        return Response(serializer.data)
 
 
 class AnswerViewSet(viewsets.ModelViewSet):
-    queryset = Answer.objects.select_related('attempt', 'question').all()
+    queryset = Answer.objects.select_related(
+        'attempt__test__course_section__subject_group__course',
+        'attempt__student',
+        'question'
+    ).prefetch_related('selected_options').all()
     serializer_class = AnswerSerializer
     permission_classes = [RoleBasedPermission]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['attempt', 'question']
-    search_fields = ['text_answer']
-    ordering_fields = ['question__position']
+    filterset_fields = ['attempt', 'question', 'is_correct']
+    search_fields = ['text_answer', 'teacher_feedback']
+    ordering_fields = ['question__position', 'score']
     ordering = ['question__position']
     
     def get_queryset(self):
@@ -200,7 +287,9 @@ class AnswerViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(attempt__test__teacher=user)
         # School admins can see answers from their school
         elif user.role == UserRole.SCHOOLADMIN:
-            queryset = queryset.filter(attempt__student__school=user.school)
+            queryset = queryset.filter(
+                attempt__test__course_section__subject_group__classroom__school=user.school
+            )
         # Superadmins can see all answers (default queryset)
         
         return queryset
@@ -211,11 +300,14 @@ class AnswerViewSet(viewsets.ModelViewSet):
         serializer = BulkGradeAnswersSerializer(data=request.data, many=True)
         if serializer.is_valid():
             answers = []
-            for item in serializer.validated_data:
-                answer = Answer.objects.get(id=item['answer_id'])
-                answer.score = item.get('score')
-                answer.save()
-                answers.append(answer)
+            with transaction.atomic():
+                for item in serializer.validated_data:
+                    answer = Answer.objects.get(id=item['answer_id'])
+                    answer.score = item.get('score')
+                    answer.teacher_feedback = item.get('teacher_feedback', '')
+                    answer.is_correct = (answer.score == answer.max_score) if answer.score is not None else None
+                    answer.save()
+                    answers.append(answer)
             
             response_serializer = AnswerSerializer(answers, many=True)
             return Response(response_serializer.data, status=status.HTTP_200_OK)
