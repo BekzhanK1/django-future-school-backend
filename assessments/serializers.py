@@ -14,6 +14,8 @@ class TestSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source='course.name', read_only=True)
     course_code = serializers.CharField(source='course.course_code', read_only=True)
     teacher_username = serializers.CharField(source='teacher.username', read_only=True)
+    teacher_first_name = serializers.CharField(source='teacher.first_name', read_only=True)
+    teacher_last_name = serializers.CharField(source='teacher.last_name', read_only=True)
     attempt_count = serializers.SerializerMethodField()
     is_available = serializers.SerializerMethodField()
     can_see_results = serializers.SerializerMethodField()
@@ -22,7 +24,8 @@ class TestSerializer(serializers.ModelSerializer):
         model = Test
         fields = ['id', 'course', 'teacher', 'title', 'description', 'is_published', 
                  'scheduled_at', 'reveal_results_at', 'course_name', 'course_code', 
-                 'teacher_username', 'attempt_count', 'is_available', 'can_see_results', 'questions']
+                 'teacher_username', 'teacher_first_name', 'teacher_last_name', 
+                 'attempt_count', 'is_available', 'can_see_results', 'questions']
     
     def get_attempt_count(self, obj):
         return obj.attempts.count()
@@ -43,13 +46,16 @@ class TestSerializer(serializers.ModelSerializer):
 class AttemptSerializer(serializers.ModelSerializer):
     student_username = serializers.CharField(source='student.username', read_only=True)
     student_email = serializers.CharField(source='student.email', read_only=True)
+    student_first_name = serializers.CharField(source='student.first_name', read_only=True)
+    student_last_name = serializers.CharField(source='student.last_name', read_only=True)
     test_title = serializers.CharField(source='test.title', read_only=True)
     answers = serializers.SerializerMethodField()
     
     class Meta:
         model = Attempt
         fields = ['id', 'test', 'student', 'started_at', 'submitted_at', 'graded_at',
-                 'score', 'max_score', 'student_username', 'student_email', 'test_title', 'answers']
+                 'score', 'max_score', 'student_username', 'student_email', 'student_first_name', 
+                 'student_last_name', 'test_title', 'answers']
     
     def get_answers(self, obj):
         answers = obj.answers.all().order_by('question__position')

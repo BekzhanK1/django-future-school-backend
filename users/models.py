@@ -42,6 +42,9 @@ class UserManager(BaseUserManager):
 
 class User(AbstractUser):
     email = models.EmailField(unique=True)
+    first_name = models.CharField(max_length=150, blank=True)
+    last_name = models.CharField(max_length=150, blank=True)
+    phone_number = models.CharField(max_length=20, blank=True, null=True)
     role = models.CharField(max_length=32, choices=UserRole.choices, default=UserRole.STUDENT)
     is_active = models.BooleanField(default=True)
     kundelik_id = models.CharField(max_length=255, null=True, blank=True, unique=True)

@@ -71,6 +71,8 @@ class SubmissionAttachmentSerializer(serializers.ModelSerializer):
 class SubmissionSerializer(serializers.ModelSerializer):
     student_username = serializers.CharField(source='student.username', read_only=True)
     student_email = serializers.CharField(source='student.email', read_only=True)
+    student_first_name = serializers.CharField(source='student.first_name', read_only=True)
+    student_last_name = serializers.CharField(source='student.last_name', read_only=True)
     assignment_title = serializers.CharField(source='assignment.title', read_only=True)
     assignment_max_grade = serializers.IntegerField(source='assignment.max_grade', read_only=True)
     grade_value = serializers.SerializerMethodField()
@@ -81,8 +83,8 @@ class SubmissionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Submission
         fields = ['id', 'assignment', 'student', 'submitted_at', 'text', 'file_url',
-                 'student_username', 'student_email', 'assignment_title', 'assignment_max_grade',
-                 'grade_value', 'grade_feedback', 'graded_at', 'attachments']
+                 'student_username', 'student_email', 'student_first_name', 'student_last_name', 
+                 'assignment_title', 'assignment_max_grade', 'grade_value', 'grade_feedback', 'graded_at', 'attachments']
     
     def get_grade_value(self, obj):
         try:
@@ -105,13 +107,18 @@ class SubmissionSerializer(serializers.ModelSerializer):
 
 class GradeSerializer(serializers.ModelSerializer):
     student_username = serializers.CharField(source='submission.student.username', read_only=True)
+    student_first_name = serializers.CharField(source='submission.student.first_name', read_only=True)
+    student_last_name = serializers.CharField(source='submission.student.last_name', read_only=True)
     assignment_title = serializers.CharField(source='submission.assignment.title', read_only=True)
     graded_by_username = serializers.CharField(source='graded_by.username', read_only=True)
+    graded_by_first_name = serializers.CharField(source='graded_by.first_name', read_only=True)
+    graded_by_last_name = serializers.CharField(source='graded_by.last_name', read_only=True)
     
     class Meta:
         model = Grade
         fields = ['id', 'submission', 'graded_by', 'grade_value', 'feedback', 'graded_at',
-                 'student_username', 'assignment_title', 'graded_by_username']
+                 'student_username', 'student_first_name', 'student_last_name', 'assignment_title', 
+                 'graded_by_username', 'graded_by_first_name', 'graded_by_last_name']
 
 
 class BulkGradeSerializer(serializers.Serializer):

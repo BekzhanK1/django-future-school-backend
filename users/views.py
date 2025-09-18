@@ -110,8 +110,8 @@ class UserViewSet(ModelViewSet):
     serializer_class = UserSerializer
     permission_classes = [IsSuperAdmin]
     filterset_fields = ['role', 'school', 'is_active']
-    search_fields = ['username', 'email']
-    ordering_fields = ['username', 'email', 'role']
+    search_fields = ['username', 'email', 'first_name', 'last_name', 'phone_number']
+    ordering_fields = ['username', 'email', 'first_name', 'last_name', 'role']
     ordering = ['username']
     
     def get_serializer_class(self):

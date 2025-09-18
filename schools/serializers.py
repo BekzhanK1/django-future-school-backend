@@ -20,11 +20,14 @@ class ClassroomSerializer(serializers.ModelSerializer):
 class ClassroomUserSerializer(serializers.ModelSerializer):
     user_username = serializers.CharField(source='user.username', read_only=True)
     user_email = serializers.CharField(source='user.email', read_only=True)
+    user_first_name = serializers.CharField(source='user.first_name', read_only=True)
+    user_last_name = serializers.CharField(source='user.last_name', read_only=True)
+    user_phone_number = serializers.CharField(source='user.phone_number', read_only=True)
     user_role = serializers.CharField(source='user.role', read_only=True)
     
     class Meta:
         model = ClassroomUser
-        fields = ['id', 'classroom', 'user', 'user_username', 'user_email', 'user_role']
+        fields = ['id', 'classroom', 'user', 'user_username', 'user_email', 'user_first_name', 'user_last_name', 'user_phone_number', 'user_role']
 
 
 class BulkClassroomUserSerializer(serializers.Serializer):
