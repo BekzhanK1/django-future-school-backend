@@ -13,7 +13,23 @@ from schools.permissions import IsSuperAdmin, IsSchoolAdminOrSuperAdmin
 
 
 class LoginView(TokenObtainPairView):
-    pass
+    def post(self, request, *args, **kwargs):
+        response = super().post(request, *args, **kwargs)
+        
+        if response.status_code == 200:
+            # Get the user from the validated credentials
+            serializer = self.get_serializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            user = serializer.user
+            
+            # Serialize user data
+            user_serializer = UserSerializer(user)
+            user_data = user_serializer.data
+            
+            # Add user data to the response
+            response.data['user'] = user_data
+            
+        return response
 
 
 class RefreshView(TokenRefreshView):
