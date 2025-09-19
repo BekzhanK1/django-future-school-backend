@@ -15,6 +15,7 @@ class Resource(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField(null=True, blank=True)
     url = models.CharField(max_length=1024, null=True, blank=True)
+    file = models.FileField(upload_to='resources/', null=True, blank=True)
     position = models.PositiveIntegerField(default=0)
 
     class Meta:
