@@ -1,0 +1,62 @@
+name: Notify on push
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+concurrency:
+  group: notify-backend
+  cancel-in-progress: true
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Start timer
+        id: t0
+        run: echo "start=$(date +%s)" >> $GITHUB_OUTPUT
+
+      - name: Notify Telegram (HTML)
+        if: ${{ always() }}
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          START_TS: ${{ steps.t0.outputs.start }}
+          STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          END_TS="$(date +%s)"
+          DUR=$(( END_TS - START_TS ))
+          H=$(( DUR/3600 )); M=$(( (DUR%3600)/60 )); S=$(( DUR%60 ))
+          printf -v D_HMS '%02d:%02d:%02d' "$H" "$M" "$S"
+          SHORT_SHA="${SHA::7}"
+
+          if [ "$STATUS" = "success" ]; then
+            ICON="✅"; TITLE="Уведомление сработало успешно"
+          elif [ "$STATUS" = "cancelled" ]; then
+            ICON="⚠️"; TITLE="Действие отменено"
+          else
+            ICON="❌"; TITLE="Сбой уведомления"
+          fi
+
+          TEXT="$ICON <b>$TITLE</b>
+                <b>Проект:</b> <code>$REPO</code>
+                <b>Ветка:</b> <code>$REF</code>
+                <b>Коммит:</b> <code>$SHORT_SHA</code>
+                <b>Длительность:</b> <code>$D_HMS</code>
+                <b>Логи:</b> <a href=\"$RUN_URL\">запуск GitHub Actions</a>
+                <i>Пушнул: ${{ github.actor }}</i>"
+
+          curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TG_CHAT_ID}" \
+            -d text="$TEXT" \
+            -d parse_mode="HTML" \
+            -d disable_web_page_preview=true
+
