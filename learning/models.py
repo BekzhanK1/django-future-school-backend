@@ -32,6 +32,7 @@ class Assignment(models.Model):
     description = models.TextField(null=True, blank=True)
     due_at = models.DateTimeField()
     max_grade = models.PositiveIntegerField(default=100, help_text="Maximum possible grade for this assignment")
+    file = models.FileField(upload_to='assignments/', null=True, blank=True)
 
     def __str__(self) -> str:
         return self.title
@@ -49,6 +50,7 @@ class AssignmentAttachment(models.Model):
     title = models.CharField(max_length=255)
     content = models.TextField(null=True, blank=True)  # For text content or file URLs
     file_url = models.URLField(null=True, blank=True)  # For file URLs
+    file = models.FileField(upload_to='assignment_attachments/', null=True, blank=True)
     position = models.PositiveIntegerField(default=0)
 
     class Meta:
@@ -63,7 +65,7 @@ class Submission(models.Model):
     student = models.ForeignKey("users.User", on_delete=models.CASCADE, related_name="submissions")
     submitted_at = models.DateTimeField(auto_now_add=True)
     text = models.TextField(null=True, blank=True)  # Keep for backward compatibility
-    file_url = models.CharField(max_length=1024, null=True, blank=True)  # Keep for backward compatibility
+    file = models.FileField(upload_to='submissions/', null=True, blank=True)
 
     def __str__(self) -> str:
         return f"Submission {self.id}"
@@ -81,6 +83,7 @@ class SubmissionAttachment(models.Model):
     title = models.CharField(max_length=255)
     content = models.TextField(null=True, blank=True)  # For text content or file URLs
     file_url = models.URLField(null=True, blank=True)  # For file URLs
+    file = models.FileField(upload_to='submission_attachments/', null=True, blank=True)
     position = models.PositiveIntegerField(default=0)
 
     class Meta:

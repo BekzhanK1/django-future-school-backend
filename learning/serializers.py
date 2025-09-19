@@ -41,7 +41,7 @@ class ResourceTreeSerializer(serializers.ModelSerializer):
 class AssignmentAttachmentSerializer(serializers.ModelSerializer):
     class Meta:
         model = AssignmentAttachment
-        fields = ['id', 'type', 'title', 'content', 'file_url', 'position', 'assignment']
+        fields = ['id', 'type', 'title', 'content', 'file_url', 'file', 'position', 'assignment']
 
 
 class AssignmentSerializer(serializers.ModelSerializer):
@@ -54,7 +54,7 @@ class AssignmentSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Assignment
-        fields = ['id', 'course_section', 'teacher', 'title', 'description', 'due_at', 'max_grade',
+        fields = ['id', 'course_section', 'teacher', 'title', 'description', 'due_at', 'max_grade', 'file',
                  'course_section_title', 'subject_group_course_name', 'subject_group_course_code', 
                  'teacher_username', 'submission_count', 'attachments']
     
@@ -65,7 +65,7 @@ class AssignmentSerializer(serializers.ModelSerializer):
 class SubmissionAttachmentSerializer(serializers.ModelSerializer):
     class Meta:
         model = SubmissionAttachment
-        fields = ['id', 'type', 'title', 'content', 'file_url', 'position', 'submission']
+        fields = ['id', 'type', 'title', 'content', 'file_url', 'file', 'position', 'submission']
 
 
 class SubmissionSerializer(serializers.ModelSerializer):
@@ -82,7 +82,7 @@ class SubmissionSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Submission
-        fields = ['id', 'assignment', 'student', 'submitted_at', 'text', 'file_url',
+        fields = ['id', 'assignment', 'student', 'submitted_at', 'text', 'file',
                  'student_username', 'student_email', 'student_first_name', 'student_last_name', 
                  'assignment_title', 'assignment_max_grade', 'grade_value', 'grade_feedback', 'graded_at', 'attachments']
     
