@@ -42,6 +42,14 @@ class CourseSectionSerializer(serializers.ModelSerializer):
         return AssignmentSerializer(assignments, many=True, context=self.context).data
 
 
+class CourseFullSerializer(serializers.ModelSerializer):
+    subject_groups = SubjectGroupSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = Course
+        fields = ['id', 'course_code', 'name', 'description', 'grade', 'subject_groups']
+
+
 class AutoCreateWeekSectionsSerializer(serializers.Serializer):
     subject_group_id = serializers.IntegerField()
     start_date = serializers.DateField()

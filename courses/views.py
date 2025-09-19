@@ -7,7 +7,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from .models import Course, SubjectGroup, CourseSection
 from .serializers import (
     CourseSerializer, SubjectGroupSerializer, CourseSectionSerializer,
-    AutoCreateWeekSectionsSerializer
+    AutoCreateWeekSectionsSerializer, CourseFullSerializer
 )
 from schools.permissions import IsSuperAdmin, IsSchoolAdminOrSuperAdmin, IsTeacherOrAbove
 
@@ -21,6 +21,13 @@ class CourseViewSet(viewsets.ModelViewSet):
     search_fields = ['course_code', 'name', 'description']
     ordering_fields = ['course_code', 'name', 'grade']
     ordering = ['course_code']
+    
+    @action(detail=False, methods=['get'], url_path='full')
+    def full(self, request):
+        """Return all courses with their associated subject groups"""
+        queryset = Course.objects.prefetch_related('subject_groups__classroom', 'subject_groups__teacher').all()
+        serializer = CourseFullSerializer(queryset, many=True)
+        return Response(serializer.data)
 
 
 class SubjectGroupViewSet(viewsets.ModelViewSet):
