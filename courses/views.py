@@ -45,7 +45,9 @@ class CourseSectionViewSet(viewsets.ModelViewSet):
     queryset = CourseSection.objects.select_related('subject_group').prefetch_related(
         'resources__children__children__children',  # Support up to 3 levels deep
         'assignments__teacher',
-        'assignments__attachments'
+        'assignments__attachments',
+        'tests__questions__options',
+        'tests__teacher'
     ).all()
     serializer_class = CourseSectionSerializer
     permission_classes = [IsTeacherOrAbove]

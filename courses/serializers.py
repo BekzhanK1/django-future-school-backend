@@ -25,10 +25,11 @@ class SubjectGroupSerializer(serializers.ModelSerializer):
 class CourseSectionSerializer(serializers.ModelSerializer):
     resources = serializers.SerializerMethodField()
     assignments = serializers.SerializerMethodField()
+    tests = serializers.SerializerMethodField()
     
     class Meta:
         model = CourseSection
-        fields = ['id', 'subject_group', 'title', 'position', 'resources', 'assignments']
+        fields = ['id', 'subject_group', 'title', 'position', 'resources', 'assignments', 'tests']
     
     def get_resources(self, obj):
         from learning.serializers import ResourceTreeSerializer
@@ -40,6 +41,11 @@ class CourseSectionSerializer(serializers.ModelSerializer):
         from learning.serializers import AssignmentSerializer
         assignments = obj.assignments.all().order_by('due_at')
         return AssignmentSerializer(assignments, many=True, context=self.context).data
+
+    def get_tests(self, obj):
+        from assessments.serializers import TestSerializer
+        tests = obj.tests.all().order_by('scheduled_at', 'id')
+        return TestSerializer(tests, many=True, context=self.context).data
 
 
 class CourseFullSerializer(serializers.ModelSerializer):
