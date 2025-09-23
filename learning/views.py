@@ -5,10 +5,12 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.db.models import Q
 
-from .models import Resource, Assignment, AssignmentAttachment, Submission, SubmissionAttachment, Grade
+from .models import Resource, Assignment, AssignmentAttachment, Submission, SubmissionAttachment, Grade, Attendance, AttendanceRecord, AttendanceStatus
 from .serializers import (
     ResourceSerializer, ResourceTreeSerializer, AssignmentSerializer, AssignmentAttachmentSerializer,
-    SubmissionSerializer, SubmissionAttachmentSerializer, GradeSerializer, BulkGradeSerializer
+    SubmissionSerializer, SubmissionAttachmentSerializer, GradeSerializer, BulkGradeSerializer,
+    AttendanceSerializer, AttendanceCreateSerializer, AttendanceUpdateSerializer, 
+    StudentAttendanceHistorySerializer, AttendanceMetricsSerializer
 )
 from .role_permissions import RoleBasedPermission
 from schools.permissions import IsSuperAdmin, IsSchoolAdminOrSuperAdmin, IsTeacherOrAbove
@@ -46,6 +48,21 @@ class ResourceViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(parent_resource__isnull=True)
         
         return queryset
+
+    @action(detail=False, methods=['patch'], url_path='change-items-order')
+    def change_items_order(self, request):
+        """Bulk update resource positions.
+        Body: [{"id": <id>, "position": <pos>}, ...]
+        """
+        items = request.data if isinstance(request.data, list) else request.data.get('items', [])
+        if not isinstance(items, list):
+            return Response({'error': 'Expected a list payload'}, status=status.HTTP_400_BAD_REQUEST)
+        id_to_pos = {item.get('id'): item.get('position') for item in items if 'id' in item and 'position' in item}
+        objs = Resource.objects.filter(id__in=id_to_pos.keys())
+        for obj in objs:
+            obj.position = id_to_pos.get(obj.id, obj.position)
+        Resource.objects.bulk_update(objs, ['position'])
+        return Response({'updated': len(objs)})
     
     @action(detail=False, methods=['get'], url_path='all')
     def all_resources(self, request):
@@ -159,6 +176,18 @@ class AssignmentAttachmentViewSet(viewsets.ModelViewSet):
         # Superadmins can see all attachments (default queryset)
         
         return queryset
+
+    @action(detail=False, methods=['patch'], url_path='change-items-order')
+    def change_items_order(self, request):
+        items = request.data if isinstance(request.data, list) else request.data.get('items', [])
+        if not isinstance(items, list):
+            return Response({'error': 'Expected a list payload'}, status=status.HTTP_400_BAD_REQUEST)
+        id_to_pos = {item.get('id'): item.get('position') for item in items if 'id' in item and 'position' in item}
+        objs = AssignmentAttachment.objects.filter(id__in=id_to_pos.keys())
+        for obj in objs:
+            obj.position = id_to_pos.get(obj.id, obj.position)
+        AssignmentAttachment.objects.bulk_update(objs, ['position'])
+        return Response({'updated': len(objs)})
     
     @action(detail=False, methods=['post'], url_path='bulk-create')
     def bulk_create(self, request):
@@ -242,6 +271,18 @@ class SubmissionAttachmentViewSet(viewsets.ModelViewSet):
         # Superadmins can see all attachments (default queryset)
         
         return queryset
+
+    @action(detail=False, methods=['patch'], url_path='change-items-order')
+    def change_items_order(self, request):
+        items = request.data if isinstance(request.data, list) else request.data.get('items', [])
+        if not isinstance(items, list):
+            return Response({'error': 'Expected a list payload'}, status=status.HTTP_400_BAD_REQUEST)
+        id_to_pos = {item.get('id'): item.get('position') for item in items if 'id' in item and 'position' in item}
+        objs = SubmissionAttachment.objects.filter(id__in=id_to_pos.keys())
+        for obj in objs:
+            obj.position = id_to_pos.get(obj.id, obj.position)
+        SubmissionAttachment.objects.bulk_update(objs, ['position'])
+        return Response({'updated': len(objs)})
     
     @action(detail=False, methods=['post'], url_path='bulk-create')
     def bulk_create(self, request):
@@ -324,3 +365,195 @@ class GradeViewSet(viewsets.ModelViewSet):
             response_serializer = GradeSerializer(grades, many=True)
             return Response(response_serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class AttendanceViewSet(viewsets.ModelViewSet):
+    queryset = Attendance.objects.select_related('subject_group', 'taken_by').prefetch_related('records__student').all()
+    permission_classes = [RoleBasedPermission]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['subject_group', 'taken_by', 'taken_at']
+    search_fields = ['subject_group__course__name', 'notes']
+    ordering_fields = ['taken_at']
+    ordering = ['-taken_at']
+    
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return AttendanceCreateSerializer
+        elif self.action in ['update', 'partial_update']:
+            return AttendanceUpdateSerializer
+        return AttendanceSerializer
+    
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        user = self.request.user
+        
+        # Students can only see attendance for their courses
+        if user.role == UserRole.STUDENT:
+            student_courses = user.classroom_users.values_list('classroom__subject_groups__course', flat=True)
+            queryset = queryset.filter(subject_group__course__in=student_courses)
+        # Teachers can see attendance for their subject groups
+        elif user.role == UserRole.TEACHER:
+            queryset = queryset.filter(subject_group__teacher=user)
+        # School admins can see attendance from their school
+        elif user.role == UserRole.SCHOOLADMIN:
+            queryset = queryset.filter(subject_group__classroom__school=user.school)
+        # Superadmins can see all attendance (default queryset)
+        
+        return queryset
+    
+    def perform_create(self, serializer):
+        serializer.save(taken_by=self.request.user)
+    
+    @action(detail=False, methods=['get'], url_path='student-history')
+    def student_history(self, request):
+        """Get attendance history for a specific student"""
+        student_id = request.query_params.get('student_id')
+        if not student_id:
+            return Response({'error': 'student_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        user = request.user
+        
+        # Check permissions
+        if user.role == UserRole.STUDENT and str(user.id) != str(student_id):
+            return Response({'error': 'You can only view your own attendance history'}, 
+                          status=status.HTTP_403_FORBIDDEN)
+        elif user.role == UserRole.TEACHER:
+            # Teachers can only see students from their subject groups
+            teacher_subject_groups = user.subject_groups.values_list('id', flat=True)
+            records = AttendanceRecord.objects.filter(
+                student_id=student_id,
+                attendance__subject_group__in=teacher_subject_groups
+            ).select_related('attendance__subject_group__course', 'attendance__subject_group__classroom', 'attendance__taken_by')
+        elif user.role == UserRole.SCHOOLADMIN:
+            # School admins can see students from their school
+            records = AttendanceRecord.objects.filter(
+                student_id=student_id,
+                attendance__subject_group__classroom__school=user.school
+            ).select_related('attendance__subject_group__course', 'attendance__subject_group__classroom', 'attendance__taken_by')
+        else:
+            # Superadmin can see all
+            records = AttendanceRecord.objects.filter(
+                student_id=student_id
+            ).select_related('attendance__subject_group__course', 'attendance__subject_group__classroom', 'attendance__taken_by')
+        
+        serializer = StudentAttendanceHistorySerializer(records, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'], url_path='metrics')
+    def metrics(self, request):
+        """Get attendance metrics for different user roles"""
+        user = request.user
+        subject_group_id = request.query_params.get('subject_group_id')
+        
+        if user.role == UserRole.STUDENT:
+            return Response({'error': 'Students cannot access metrics'}, 
+                          status=status.HTTP_403_FORBIDDEN)
+        
+        # Build base queryset based on user role
+        if user.role == UserRole.TEACHER:
+            queryset = Attendance.objects.filter(subject_group__teacher=user)
+        elif user.role == UserRole.SCHOOLADMIN:
+            queryset = Attendance.objects.filter(subject_group__classroom__school=user.school)
+        else:  # Superadmin
+            queryset = Attendance.objects.all()
+        
+        # Filter by subject group if specified
+        if subject_group_id:
+            queryset = queryset.filter(subject_group_id=subject_group_id)
+        
+        # Calculate metrics
+        metrics_data = []
+        
+        if subject_group_id:
+            # Single subject group metrics
+            attendance = queryset.first()
+            if attendance:
+                metrics_data.append({
+                    'subject_group_name': str(attendance.subject_group),
+                    'classroom_name': str(attendance.subject_group.classroom),
+                    'course_name': attendance.subject_group.course.name,
+                    'total_sessions': queryset.count(),
+                    'present_count': sum(a.present_count for a in queryset),
+                    'excused_count': sum(a.excused_count for a in queryset),
+                    'not_present_count': sum(a.not_present_count for a in queryset),
+                    'attendance_percentage': round(
+                        sum(a.attendance_percentage for a in queryset) / queryset.count() if queryset.count() > 0 else 0, 2
+                    )
+                })
+        else:
+            # Multiple subject groups metrics
+            subject_groups = queryset.values('subject_group').distinct()
+            
+            for sg_data in subject_groups:
+                sg_id = sg_data['subject_group']
+                sg_attendances = queryset.filter(subject_group_id=sg_id)
+                
+                if sg_attendances.exists():
+                    first_attendance = sg_attendances.first()
+                    metrics_data.append({
+                        'subject_group_name': str(first_attendance.subject_group),
+                        'classroom_name': str(first_attendance.subject_group.classroom),
+                        'course_name': first_attendance.subject_group.course.name,
+                        'total_sessions': sg_attendances.count(),
+                        'present_count': sum(a.present_count for a in sg_attendances),
+                        'excused_count': sum(a.excused_count for a in sg_attendances),
+                        'not_present_count': sum(a.not_present_count for a in sg_attendances),
+                        'attendance_percentage': round(
+                            sum(a.attendance_percentage for a in sg_attendances) / sg_attendances.count() if sg_attendances.count() > 0 else 0, 2
+                        )
+                    })
+        
+        serializer = AttendanceMetricsSerializer(metrics_data, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=True, methods=['post'], url_path='mark-attendance')
+    def mark_attendance(self, request, pk=None):
+        """Mark attendance for all students in a subject group"""
+        attendance = self.get_object()
+        records_data = request.data.get('records', [])
+        
+        # Clear existing records
+        attendance.records.all().delete()
+        
+        # Create new records
+        for record_data in records_data:
+            AttendanceRecord.objects.create(
+                attendance=attendance,
+                student_id=record_data['student_id'],
+                status=record_data['status'],
+                notes=record_data.get('notes', '')
+            )
+        
+        serializer = AttendanceSerializer(attendance, context={'request': request})
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'], url_path='subject-group-students')
+    def subject_group_students(self, request):
+        """Get students for a subject group to mark attendance"""
+        subject_group_id = request.query_params.get('subject_group_id')
+        if not subject_group_id:
+            return Response({'error': 'subject_group_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            from courses.models import SubjectGroup
+            subject_group = SubjectGroup.objects.get(id=subject_group_id)
+        except SubjectGroup.DoesNotExist:
+            return Response({'error': 'Subject group not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Check permissions
+        user = request.user
+        if user.role == UserRole.TEACHER and subject_group.teacher != user:
+            return Response({'error': 'You can only view students for your own subject groups'}, 
+                          status=status.HTTP_403_FORBIDDEN)
+        elif user.role == UserRole.SCHOOLADMIN and subject_group.classroom.school != user.school:
+            return Response({'error': 'You can only view students from your school'}, 
+                          status=status.HTTP_403_FORBIDDEN)
+        
+        # Get students in the classroom
+        students = subject_group.classroom.classroom_users.filter(
+            user__role=UserRole.STUDENT
+        ).select_related('user').values(
+            'user__id', 'user__username', 'user__first_name', 'user__last_name', 'user__email'
+        )
+        
+        return Response(list(students))

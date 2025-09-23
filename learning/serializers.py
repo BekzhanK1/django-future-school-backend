@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Resource, Assignment, AssignmentAttachment, Submission, SubmissionAttachment, Grade
+from .models import Resource, Assignment, AssignmentAttachment, Submission, SubmissionAttachment, Grade, Attendance, AttendanceRecord, AttendanceStatus
 
 
 class ResourceSerializer(serializers.ModelSerializer):
@@ -132,3 +132,128 @@ class BulkGradeSerializer(serializers.Serializer):
         except Submission.DoesNotExist:
             raise serializers.ValidationError("Submission does not exist")
         return value
+
+
+class AttendanceRecordSerializer(serializers.ModelSerializer):
+    student_username = serializers.CharField(source='student.username', read_only=True)
+    student_first_name = serializers.CharField(source='student.first_name', read_only=True)
+    student_last_name = serializers.CharField(source='student.last_name', read_only=True)
+    student_email = serializers.CharField(source='student.email', read_only=True)
+    
+    class Meta:
+        model = AttendanceRecord
+        fields = ['id', 'student', 'status', 'notes', 'student_username', 'student_first_name', 'student_last_name', 'student_email']
+        read_only_fields = ['id']
+
+
+class AttendanceSerializer(serializers.ModelSerializer):
+    subject_group_course_name = serializers.CharField(source='subject_group.course.name', read_only=True)
+    subject_group_course_code = serializers.CharField(source='subject_group.course.course_code', read_only=True)
+    classroom_name = serializers.CharField(source='subject_group.classroom', read_only=True)
+    taken_by_username = serializers.CharField(source='taken_by.username', read_only=True)
+    taken_by_first_name = serializers.CharField(source='taken_by.first_name', read_only=True)
+    taken_by_last_name = serializers.CharField(source='taken_by.last_name', read_only=True)
+    
+    # Metrics
+    total_students = serializers.ReadOnlyField()
+    present_count = serializers.ReadOnlyField()
+    excused_count = serializers.ReadOnlyField()
+    not_present_count = serializers.ReadOnlyField()
+    attendance_percentage = serializers.ReadOnlyField()
+    
+    # Records
+    records = AttendanceRecordSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = Attendance
+        fields = ['id', 'subject_group', 'taken_by', 'taken_at', 'notes',
+                 'subject_group_course_name', 'subject_group_course_code', 'classroom_name',
+                 'taken_by_username', 'taken_by_first_name', 'taken_by_last_name',
+                 'total_students', 'present_count', 'excused_count', 'not_present_count', 
+                 'attendance_percentage', 'records']
+        read_only_fields = ['id', 'taken_at']
+
+
+class AttendanceCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating attendance with bulk student records"""
+    records = AttendanceRecordSerializer(many=True)
+    
+    class Meta:
+        model = Attendance
+        fields = ['subject_group', 'notes', 'records']
+    
+    def create(self, validated_data):
+        records_data = validated_data.pop('records')
+        attendance = Attendance.objects.create(**validated_data)
+        
+        for record_data in records_data:
+            AttendanceRecord.objects.create(attendance=attendance, **record_data)
+        
+        return attendance
+    
+    def validate_subject_group(self, value):
+        """Ensure the user has permission to take attendance for this subject group"""
+        user = self.context['request'].user
+        
+        # Check if user is teacher of this subject group
+        if user.role == 'teacher' and value.teacher != user:
+            raise serializers.ValidationError("You can only take attendance for subject groups you teach.")
+        
+        # Superadmin and school admin can take attendance for any subject group
+        if user.role not in ['teacher', 'superadmin', 'schooladmin']:
+            raise serializers.ValidationError("You don't have permission to take attendance.")
+        
+        return value
+
+
+class AttendanceUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for updating attendance records"""
+    records = AttendanceRecordSerializer(many=True)
+    
+    class Meta:
+        model = Attendance
+        fields = ['notes', 'records']
+    
+    def update(self, instance, validated_data):
+        records_data = validated_data.pop('records', None)
+        
+        # Update attendance notes
+        instance.notes = validated_data.get('notes', instance.notes)
+        instance.save()
+        
+        # Update records if provided
+        if records_data is not None:
+            # Delete existing records
+            instance.records.all().delete()
+            
+            # Create new records
+            for record_data in records_data:
+                AttendanceRecord.objects.create(attendance=instance, **record_data)
+        
+        return instance
+
+
+class StudentAttendanceHistorySerializer(serializers.ModelSerializer):
+    """Serializer for student's attendance history"""
+    subject_group_course_name = serializers.CharField(source='attendance.subject_group.course.name', read_only=True)
+    subject_group_course_code = serializers.CharField(source='attendance.subject_group.course.course_code', read_only=True)
+    classroom_name = serializers.CharField(source='attendance.subject_group.classroom', read_only=True)
+    taken_at = serializers.DateTimeField(source='attendance.taken_at', read_only=True)
+    taken_by_username = serializers.CharField(source='attendance.taken_by.username', read_only=True)
+    
+    class Meta:
+        model = AttendanceRecord
+        fields = ['id', 'status', 'notes', 'subject_group_course_name', 'subject_group_course_code',
+                 'classroom_name', 'taken_at', 'taken_by_username']
+
+
+class AttendanceMetricsSerializer(serializers.Serializer):
+    """Serializer for attendance metrics and statistics"""
+    total_sessions = serializers.IntegerField()
+    present_count = serializers.IntegerField()
+    excused_count = serializers.IntegerField()
+    not_present_count = serializers.IntegerField()
+    attendance_percentage = serializers.FloatField()
+    subject_group_name = serializers.CharField()
+    classroom_name = serializers.CharField()
+    course_name = serializers.CharField()

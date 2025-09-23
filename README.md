@@ -937,6 +937,226 @@ GET /api/tests/?course=1
 }
 ```
 
+## 🗓️ Attendance
+
+### Shared: Subject Group Members (Teacher + Students)
+
+Use this before taking attendance to fetch the teacher and students for a subject group.
+
+```http
+GET /api/courses/subject-groups/{subject_group_id}/members/
+Authorization: Bearer <token>
+```
+
+Access rules:
+- Teacher: only their own subject groups
+- School admin: subject groups in their school (read-only)
+- Superadmin: all subject groups
+- Student: only if they belong to the subject group’s classroom
+
+Example response:
+```json
+{
+  "subject_group": {
+    "id": 12,
+    "course_id": 7,
+    "course_code": "MATH101",
+    "course_name": "Mathematics",
+    "classroom": "10A - School Name"
+  },
+  "teacher": {
+    "id": 55,
+    "username": "teacher_smith",
+    "first_name": "Sarah",
+    "last_name": "Smith",
+    "email": "sarah.smith@school.com"
+  },
+  "students": [
+    {
+      "id": 101,
+      "username": "john_doe",
+      "first_name": "John",
+      "last_name": "Doe",
+      "email": "john.doe@school.com"
+    }
+  ]
+}
+```
+
+### Status values
+- `present`
+- `excused`
+- `not_present`
+
+Attendance percentage = (present + excused) / total_students * 100
+
+### Teacher Workflow
+
+1) Get members for the subject group
+```http
+GET /api/courses/subject-groups/12/members/
+Authorization: Bearer <teacher_token>
+```
+
+2) Take attendance (create session)
+```http
+POST /api/learning/attendance/
+Content-Type: application/json
+Authorization: Bearer <teacher_token>
+
+{
+  "subject_group": 12,
+  "notes": "Regular class - chapter 5",
+  "records": [
+    { "student": 101, "status": "present", "notes": "" },
+    { "student": 102, "status": "excused", "notes": "Medical appointment" },
+    { "student": 103, "status": "not_present", "notes": "" }
+  ]
+}
+```
+
+Response:
+```json
+{
+  "id": 44,
+  "subject_group": 12,
+  "taken_by": 55,
+  "taken_at": "2025-09-23T08:43:00Z",
+  "notes": "Regular class - chapter 5",
+  "subject_group_course_name": "Mathematics",
+  "subject_group_course_code": "MATH101",
+  "classroom_name": "10A - School Name",
+  "taken_by_username": "teacher_smith",
+  "taken_by_first_name": "Sarah",
+  "taken_by_last_name": "Smith",
+  "total_students": 28,
+  "present_count": 26,
+  "excused_count": 1,
+  "not_present_count": 1,
+  "attendance_percentage": 96.43,
+  "records": [
+    {
+      "id": 201,
+      "student": 101,
+      "status": "present",
+      "notes": "",
+      "student_username": "john_doe",
+      "student_first_name": "John",
+      "student_last_name": "Doe",
+      "student_email": "john.doe@school.com"
+    }
+  ]
+}
+```
+
+3) View attendance sessions for a subject group
+```http
+GET /api/learning/attendance/?subject_group=12
+Authorization: Bearer <teacher_token>
+```
+
+4) Update an attendance session
+```http
+PUT /api/learning/attendance/44/
+Content-Type: application/json
+Authorization: Bearer <teacher_token>
+
+{
+  "notes": "Updated: chapter 5 review",
+  "records": [
+    { "student": 101, "status": "present", "notes": "On time" },
+    { "student": 102, "status": "present", "notes": "Late but present" },
+    { "student": 103, "status": "not_present", "notes": "Absent" }
+  ]
+}
+```
+
+5) Metrics
+- All your subject groups:
+```http
+GET /api/learning/attendance/metrics/
+Authorization: Bearer <teacher_token>
+```
+- One subject group:
+```http
+GET /api/learning/attendance/metrics/?subject_group_id=12
+Authorization: Bearer <teacher_token>
+```
+
+Example response:
+```json
+[
+  {
+    "subject_group_name": "MATH101 / 10A - School Name",
+    "classroom_name": "10A - School Name",
+    "course_name": "Mathematics",
+    "total_sessions": 8,
+    "present_count": 206,
+    "excused_count": 6,
+    "not_present_count": 12,
+    "attendance_percentage": 94.62
+  }
+]
+```
+
+### School Admin (Read-only)
+
+- Members in your school:
+```http
+GET /api/courses/subject-groups/12/members/
+Authorization: Bearer <school_admin_token>
+```
+- View attendance (filterable by `subject_group`, `taken_by`, `taken_at`):
+```http
+GET /api/learning/attendance/?subject_group=12
+Authorization: Bearer <school_admin_token>
+```
+- Metrics across your school:
+```http
+GET /api/learning/attendance/metrics/
+Authorization: Bearer <school_admin_token>
+```
+
+### Superadmin
+
+- Same as school admin but for all schools:
+```http
+GET /api/courses/subject-groups/12/members/
+Authorization: Bearer <superadmin_token>
+```
+```http
+GET /api/learning/attendance/metrics/?subject_group_id=12
+Authorization: Bearer <superadmin_token>
+```
+
+### Student
+
+- View members (only if in the classroom):
+```http
+GET /api/courses/subject-groups/12/members/
+Authorization: Bearer <student_token>
+```
+- View own attendance history:
+```http
+GET /api/learning/attendance/student-history/?student_id=101
+Authorization: Bearer <student_token>
+```
+Response:
+```json
+[
+  {
+    "id": 201,
+    "status": "present",
+    "notes": "",
+    "subject_group_course_name": "Mathematics",
+    "subject_group_course_code": "MATH101",
+    "classroom_name": "10A - School Name",
+    "taken_at": "2025-09-23T08:43:00Z",
+    "taken_by_username": "teacher_smith"
+  }
+]
+```
+
 ## 🛡️ Security Features
 
 - **JWT Authentication** - Secure token-based auth

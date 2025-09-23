@@ -1,6 +1,6 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import ResourceViewSet, AssignmentViewSet, AssignmentAttachmentViewSet, SubmissionViewSet, SubmissionAttachmentViewSet, GradeViewSet
+from .views import ResourceViewSet, AssignmentViewSet, AssignmentAttachmentViewSet, SubmissionViewSet, SubmissionAttachmentViewSet, GradeViewSet, AttendanceViewSet
 from .calendar_views import calendar_events, upcoming_events
 
 router = DefaultRouter()
@@ -10,6 +10,7 @@ router.register(r'assignment-attachments', AssignmentAttachmentViewSet)
 router.register(r'submissions', SubmissionViewSet)
 router.register(r'submission-attachments', SubmissionAttachmentViewSet)
 router.register(r'grades', GradeViewSet)
+router.register(r'attendance', AttendanceViewSet)
 
 urlpatterns = [
     path('', include(router.urls)),

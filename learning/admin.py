@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import (
     Resource, Assignment, AssignmentAttachment, Submission, 
-    SubmissionAttachment, Grade
+    SubmissionAttachment, Grade, Attendance, AttendanceRecord
 )
 
 
@@ -83,3 +83,74 @@ class GradeAdmin(admin.ModelAdmin):
             'submission__student',
             'graded_by'
         )
+
+
+class AttendanceRecordInline(admin.TabularInline):
+    model = AttendanceRecord
+    extra = 0
+    fields = ('student', 'status', 'notes')
+    autocomplete_fields = ('student',)
+
+
+@admin.register(Attendance)
+class AttendanceAdmin(admin.ModelAdmin):
+    list_display = ('id', 'subject_group', 'taken_by', 'taken_at', 'total_students', 'present_count', 'excused_count', 'not_present_count', 'attendance_percentage')
+    list_filter = ('subject_group__course', 'subject_group__classroom', 'taken_by__role', 'taken_at')
+    search_fields = ('subject_group__course__name', 'notes', 'taken_by__username')
+    autocomplete_fields = ('subject_group', 'taken_by')
+    date_hierarchy = 'taken_at'
+    inlines = [AttendanceRecordInline]
+    readonly_fields = ('taken_at', 'total_students', 'present_count', 'excused_count', 'not_present_count', 'attendance_percentage')
+    
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related(
+            'subject_group__course',
+            'subject_group__classroom',
+            'taken_by'
+        ).prefetch_related('records__student')
+    
+    def total_students(self, obj):
+        return obj.total_students
+    total_students.short_description = 'Total Students'
+    
+    def present_count(self, obj):
+        return obj.present_count
+    present_count.short_description = 'Present'
+    
+    def excused_count(self, obj):
+        return obj.excused_count
+    excused_count.short_description = 'Excused'
+    
+    def not_present_count(self, obj):
+        return obj.not_present_count
+    not_present_count.short_description = 'Not Present'
+    
+    def attendance_percentage(self, obj):
+        return f"{obj.attendance_percentage}%"
+    attendance_percentage.short_description = 'Attendance %'
+
+
+@admin.register(AttendanceRecord)
+class AttendanceRecordAdmin(admin.ModelAdmin):
+    list_display = ('id', 'attendance', 'student', 'status', 'attendance_date', 'attendance_course')
+    list_filter = ('status', 'attendance__subject_group__course', 'attendance__taken_at')
+    search_fields = ('student__username', 'student__first_name', 'student__last_name', 'notes')
+    autocomplete_fields = ('attendance', 'student')
+    date_hierarchy = 'attendance__taken_at'
+    
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related(
+            'attendance__subject_group__course',
+            'attendance__subject_group__classroom',
+            'student'
+        )
+    
+    def attendance_date(self, obj):
+        return obj.attendance.taken_at.strftime('%Y-%m-%d %H:%M')
+    attendance_date.short_description = 'Date'
+    attendance_date.admin_order_field = 'attendance__taken_at'
+    
+    def attendance_course(self, obj):
+        return obj.attendance.subject_group.course.name
+    attendance_course.short_description = 'Course'
+    attendance_course.admin_order_field = 'attendance__subject_group__course__name'

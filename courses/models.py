@@ -41,6 +41,14 @@ class CourseSection(models.Model):
     def __str__(self) -> str:
         return self.title
 
+    def save(self, *args, **kwargs):
+        # Auto-increment position within subject_group
+        if not self.position or self.position == 0:
+            siblings = CourseSection.objects.filter(subject_group=self.subject_group)
+            max_pos = siblings.aggregate(models.Max('position'))['position__max'] or 0
+            self.position = max_pos + 1
+        super().save(*args, **kwargs)
+
 from django.db import models
 
 # Create your models here.

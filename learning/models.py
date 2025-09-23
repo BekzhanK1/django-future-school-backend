@@ -6,6 +6,13 @@ class ResourceType(models.TextChoices):
     LINK = "link", "Link"
     DIRECTORY = "directory", "Directory"
     TEXT = "text", "Text"
+    VIDEO = "video", "Video"
+    AUDIO = "audio", "Audio"
+    IMAGE = "image", "Image"
+    PDF = "pdf", "PDF"
+    WORD = "word", "Word"
+    EXCEL = "excel", "Excel"
+    POWERPOINT = "powerpoint", "Powerpoint"
 
 
 class Resource(models.Model):
@@ -23,6 +30,14 @@ class Resource(models.Model):
 
     def __str__(self) -> str:
         return self.title
+
+    def save(self, *args, **kwargs):
+        # Auto-increment position within (course_section, parent_resource)
+        if not self.position or self.position == 0:
+            siblings = Resource.objects.filter(course_section=self.course_section, parent_resource=self.parent_resource)
+            max_pos = siblings.aggregate(models.Max('position'))['position__max'] or 0
+            self.position = max_pos + 1
+        super().save(*args, **kwargs)
 
 
 class Assignment(models.Model):
@@ -59,6 +74,14 @@ class AssignmentAttachment(models.Model):
     def __str__(self) -> str:
         return f"{self.assignment.title} - {self.title}"
 
+    def save(self, *args, **kwargs):
+        # Auto-increment position within assignment
+        if not self.position or self.position == 0:
+            siblings = AssignmentAttachment.objects.filter(assignment=self.assignment)
+            max_pos = siblings.aggregate(models.Max('position'))['position__max'] or 0
+            self.position = max_pos + 1
+        super().save(*args, **kwargs)
+
 
 class Submission(models.Model):
     assignment = models.ForeignKey(Assignment, on_delete=models.CASCADE, related_name="submissions")
@@ -92,6 +115,14 @@ class SubmissionAttachment(models.Model):
     def __str__(self) -> str:
         return f"{self.submission} - {self.title}"
 
+    def save(self, *args, **kwargs):
+        # Auto-increment position within submission
+        if not self.position or self.position == 0:
+            siblings = SubmissionAttachment.objects.filter(submission=self.submission)
+            max_pos = siblings.aggregate(models.Max('position'))['position__max'] or 0
+            self.position = max_pos + 1
+        super().save(*args, **kwargs)
+
 
 class Grade(models.Model):
     submission = models.OneToOneField(Submission, on_delete=models.CASCADE, related_name="grade")
@@ -101,5 +132,78 @@ class Grade(models.Model):
     graded_at = models.DateTimeField(auto_now_add=True)
 
 from django.db import models
+from django.utils import timezone
+
+
+class AttendanceStatus(models.TextChoices):
+    PRESENT = "present", "Present"
+    EXCUSED = "excused", "Excused"
+    NOT_PRESENT = "not_present", "Not Present"
+
+
+class Attendance(models.Model):
+    """Represents an attendance session for a subject group"""
+    subject_group = models.ForeignKey("courses.SubjectGroup", on_delete=models.CASCADE, related_name="attendances")
+    taken_by = models.ForeignKey("users.User", on_delete=models.CASCADE, related_name="taken_attendances")
+    taken_at = models.DateTimeField(default=timezone.now)
+    notes = models.TextField(null=True, blank=True, help_text="Optional notes about the attendance session")
+    
+    class Meta:
+        ordering = ['-taken_at']
+        indexes = [
+            models.Index(fields=['subject_group', 'taken_at']),
+            models.Index(fields=['taken_by', 'taken_at']),
+        ]
+    
+    def __str__(self) -> str:
+        return f"Attendance for {self.subject_group} on {self.taken_at.strftime('%Y-%m-%d %H:%M')}"
+    
+    @property
+    def total_students(self):
+        """Total number of students in the classroom"""
+        return self.subject_group.classroom.classroom_users.filter(user__role='student').count()
+    
+    @property
+    def present_count(self):
+        """Number of students marked as present"""
+        return self.records.filter(status=AttendanceStatus.PRESENT).count()
+    
+    @property
+    def excused_count(self):
+        """Number of students marked as excused"""
+        return self.records.filter(status=AttendanceStatus.EXCUSED).count()
+    
+    @property
+    def not_present_count(self):
+        """Number of students marked as not present"""
+        return self.records.filter(status=AttendanceStatus.NOT_PRESENT).count()
+    
+    @property
+    def attendance_percentage(self):
+        """Calculate attendance percentage (present + excused / total)"""
+        if self.total_students == 0:
+            return 0
+        return round(((self.present_count + self.excused_count) / self.total_students) * 100, 2)
+
+
+class AttendanceRecord(models.Model):
+    """Individual student attendance record within an attendance session"""
+    attendance = models.ForeignKey(Attendance, on_delete=models.CASCADE, related_name="records")
+    student = models.ForeignKey("users.User", on_delete=models.CASCADE, related_name="attendance_records")
+    status = models.CharField(max_length=20, choices=AttendanceStatus.choices, default=AttendanceStatus.NOT_PRESENT)
+    notes = models.TextField(null=True, blank=True, help_text="Optional notes about this student's attendance")
+    
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['attendance', 'student'], name='unique_attendance_student'),
+        ]
+        indexes = [
+            models.Index(fields=['student']),
+            models.Index(fields=['status']),
+        ]
+    
+    def __str__(self) -> str:
+        return f"{self.student.username} - {self.get_status_display()} on {self.attendance.taken_at.strftime('%Y-%m-%d')}"
+
 
 # Create your models here.

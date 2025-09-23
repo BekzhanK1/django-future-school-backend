@@ -10,6 +10,7 @@ from .serializers import (
     AutoCreateWeekSectionsSerializer, CourseFullSerializer
 )
 from schools.permissions import IsSuperAdmin, IsSchoolAdminOrSuperAdmin, IsTeacherOrAbove
+from users.models import UserRole
 
 
 class CourseViewSet(viewsets.ModelViewSet):
@@ -40,6 +41,84 @@ class SubjectGroupViewSet(viewsets.ModelViewSet):
     ordering_fields = ['course__name', 'classroom__grade', 'classroom__letter']
     ordering = ['course__name', 'classroom__grade', 'classroom__letter']
 
+    def get_permissions(self):
+        # Keep SubjectGroup management for superadmins only, but allow role-based access to the
+        # read-only `members` endpoint.
+        if getattr(self, 'action', None) == 'members':
+            return [IsTeacherOrAbove()]  # teachers, school admins, superadmins
+        return super().get_permissions()
+
+    @action(detail=True, methods=['get'], url_path='members')
+    def members(self, request, pk=None):
+        """Return teacher and students of a subject group.
+
+        Access rules:
+        - Teacher: only for their own subject group
+        - School admin: subject groups in their school
+        - Superadmin: any subject group
+        - Student: can view only if belongs to the classroom of the subject group
+        """
+        try:
+            subject_group = SubjectGroup.objects.select_related('course', 'classroom', 'teacher', 'classroom__school').get(id=pk)
+        except SubjectGroup.DoesNotExist:
+            return Response({'error': 'Subject group not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        user = request.user
+
+        # Role-based visibility checks
+        if user.role == UserRole.TEACHER:
+            if subject_group.teacher_id != user.id:
+                return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+        elif user.role == UserRole.SCHOOLADMIN:
+            if subject_group.classroom.school_id != getattr(user.school, 'id', None):
+                return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+        elif user.role == UserRole.STUDENT:
+            # Student must belong to the classroom
+            is_in_classroom = user.classroom_users.filter(classroom_id=subject_group.classroom_id).exists()
+            if not is_in_classroom:
+                return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+        # Superadmin: allowed
+
+        # Build response
+        teacher = subject_group.teacher
+        teacher_payload = None
+        if teacher is not None:
+            teacher_payload = {
+                'id': teacher.id,
+                'username': teacher.username,
+                'first_name': teacher.first_name,
+                'last_name': teacher.last_name,
+                'email': teacher.email,
+            }
+
+        # Fetch students of the classroom
+        students_qs = subject_group.classroom.classroom_users.select_related('user').filter(
+            user__role=UserRole.STUDENT
+        )
+        students = []
+        for cu in students_qs:
+            u = cu.user
+            students.append({
+                'id': u.id,
+                'username': u.username,
+                'first_name': u.first_name,
+                'last_name': u.last_name,
+                'email': u.email,
+            })
+
+        data = {
+            'subject_group': {
+                'id': subject_group.id,
+                'course_id': subject_group.course_id,
+                'course_code': subject_group.course.course_code,
+                'course_name': subject_group.course.name,
+                'classroom': str(subject_group.classroom),
+            },
+            'teacher': teacher_payload,
+            'students': students,
+        }
+        return Response(data)
+
 
 class CourseSectionViewSet(viewsets.ModelViewSet):
     queryset = CourseSection.objects.select_related('subject_group').prefetch_related(
@@ -56,6 +135,21 @@ class CourseSectionViewSet(viewsets.ModelViewSet):
     search_fields = ['title']
     ordering_fields = ['position', 'title']
     ordering = ['position', 'id']
+
+    @action(detail=False, methods=['patch'], url_path='change-items-order')
+    def change_items_order(self, request):
+        """Bulk update course section positions.
+        Body: [{"id": <id>, "position": <pos>}, ...]
+        """
+        items = request.data if isinstance(request.data, list) else request.data.get('items', [])
+        if not isinstance(items, list):
+            return Response({'error': 'Expected a list payload'}, status=status.HTTP_400_BAD_REQUEST)
+        id_to_pos = {item.get('id'): item.get('position') for item in items if 'id' in item and 'position' in item}
+        objs = CourseSection.objects.filter(id__in=id_to_pos.keys())
+        for obj in objs:
+            obj.position = id_to_pos.get(obj.id, obj.position)
+        CourseSection.objects.bulk_update(objs, ['position'])
+        return Response({'updated': len(objs)})
     
     @action(detail=False, methods=['post'], url_path='auto-create-weeks')
     def auto_create_weeks(self, request):
