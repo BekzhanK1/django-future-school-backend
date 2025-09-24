@@ -1209,3 +1209,281 @@ If you need help with the API, check the Swagger documentation or contact the ba
 ---
 
 **Happy coding! 🚀**
+
+---
+
+## 🇷🇺 Руководство: Тесты (Assessments) — подробная инструкция с примерами
+
+Базовый URL для всех примеров ниже: `http://localhost:8000/api/`
+
+Аутентификация (JWT):
+```
+Authorization: Bearer <your_jwt_token>
+Content-Type: application/json
+```
+
+### Типы вопросов
+- multiple_choice — Один правильный вариант (строгая проверка: засчитывается только один выбранный правильный вариант и ровно один выбор)
+- choose_all — Несколько правильных вариантов (частичный балл: любая неверная приводит к 0, без неверных — доля правильных × балл)
+- open_question — Открытый ответ (нужна ручная проверка учителем)
+- matching — Сопоставление пар (частичный балл по доле совпавших пар)
+
+---
+
+## Учитель: создание теста, добавление/изменение вопросов и управление
+
+### Создать тест (с вопросами или черновик без вопросов)
+```http
+POST /api/assessments/tests/
+Authorization: Bearer <teacher_token>
+Content-Type: application/json
+
+{
+  "course_section": 42,
+  "title": "Алгебра: Квиз 1",
+  "description": "Линейные уравнения",
+  "is_published": false,
+  "scheduled_at": "2025-09-30T09:00:00Z",
+  "reveal_results_at": "2025-09-30T17:00:00Z",
+  "time_limit_minutes": 30,
+  "allow_multiple_attempts": true,
+  "max_attempts": 2,
+  "show_correct_answers": true,
+  "show_feedback": true,
+  "show_score_immediately": false,
+  "questions": [
+    {
+      "type": "multiple_choice",
+      "text": "2 + 2 = ?",
+      "points": 2,
+      "position": 1,
+      "options": [
+        {"text": "3", "is_correct": false, "position": 1},
+        {"text": "4", "is_correct": true, "position": 2}
+      ]
+    },
+    {
+      "type": "choose_all",
+      "text": "Выберите четные числа",
+      "points": 3,
+      "position": 2,
+      "options": [
+        {"text": "1", "is_correct": false, "position": 1},
+        {"text": "2", "is_correct": true, "position": 2},
+        {"text": "4", "is_correct": true, "position": 3}
+      ]
+    },
+    {
+      "type": "open_question",
+      "text": "Объясните форму y = mx + b.",
+      "points": 5,
+      "position": 3
+    },
+    {
+      "type": "matching",
+      "text": "Соотнесите термины",
+      "points": 4,
+      "position": 4,
+      "matching_pairs_json": [
+        {"left": "Наклон", "right": "Скорость изменения"},
+        {"left": "Пересечение", "right": "Значение при x=0"}
+      ]
+    }
+  ]
+}
+```
+
+Примечания:
+- Поле `teacher` на стороне бэкенда связывается с текущим пользователем-учителем (модель требует это поле).
+- Доступность теста для учеников определяется полями `is_published` и `scheduled_at`.
+
+### Опубликовать / снять с публикации тест
+```http
+POST /api/assessments/tests/{test_id}/publish/
+Authorization: Bearer <teacher_token>
+```
+```http
+POST /api/assessments/tests/{test_id}/unpublish/
+Authorization: Bearer <teacher_token>
+```
+
+### Добавить вопрос (если тест создан без вложенных вопросов)
+```http
+POST /api/assessments/questions/
+Authorization: Bearer <teacher_token>
+Content-Type: application/json
+
+{
+  "test": 101,
+  "type": "multiple_choice",
+  "text": "5 - 3 = ?",
+  "points": 1,
+  "position": 5,
+  "options": [
+    {"text": "1", "is_correct": false, "position": 1},
+    {"text": "2", "is_correct": true, "position": 2}
+  ]
+}
+```
+
+### Типы вопросов — как задать данные
+- multiple_choice: один правильный в `options[]` (`is_correct: true` ровно у одного)
+- choose_all: несколько правильных в `options[]` (`is_correct: true` у нескольких)
+- open_question: открытый текст, можно указать `correct_answer_text`/`sample_answer` (подсказки)
+- matching: пары в `matching_pairs_json` (массив объектов с полями `left` и `right`)
+
+### Обновление теста/вопроса/варианта
+```http
+PATCH /api/assessments/tests/{id}/
+Authorization: Bearer <teacher_token>
+Content-Type: application/json
+
+{ "title": "Алгебра: Квиз 1 (обновлено)", "scheduled_at": "2025-09-30T10:00:00Z" }
+```
+```http
+PATCH /api/assessments/questions/{id}/
+Authorization: Bearer <teacher_token>
+Content-Type: application/json
+
+{ "text": "5 − 2 = ?", "points": 2 }
+```
+```http
+PATCH /api/assessments/options/{id}/
+Authorization: Bearer <teacher_token>
+Content-Type: application/json
+
+{ "is_correct": true, "position": 1 }
+```
+
+Удаление — `DELETE` соответствующего ресурса: `tests/{id}/`, `questions/{id}/`, `options/{id}/`.
+
+### Массовая проверка открытых ответов (ручное выставление баллов)
+```http
+POST /api/assessments/answers/bulk-grade/
+Authorization: Bearer <teacher_token>
+Content-Type: application/json
+
+[
+  { "answer_id": 555, "score": 4.0, "teacher_feedback": "Хорошее объяснение." },
+  { "answer_id": 556, "score": 3.0, "teacher_feedback": "Добавьте пример." }
+]
+```
+
+---
+
+## Ученик: прохождение теста и отправка ответов
+
+### Список доступных тестов
+```http
+GET /api/assessments/tests/?ordering=-scheduled_at
+Authorization: Bearer <student_token>
+```
+Ученик видит только тесты своих секций. Тест считается доступным, если `is_published: true` и `scheduled_at` не в будущем.
+
+### Начать попытку
+```http
+POST /api/assessments/attempts/start/
+Authorization: Bearer <student_token>
+Content-Type: application/json
+
+{ "test_id": 101 }
+```
+Правила: тест опубликован; если задан `scheduled_at` — время наступило; не превышен `max_attempts`. Если есть незавершенная попытка — вернется она же.
+
+### Отправлять ответы по одному вопросу
+```http
+POST /api/assessments/attempts/{attempt_id}/submit-answer/
+Authorization: Bearer <student_token>
+Content-Type: application/json
+```
+
+- multiple_choice (выбор одного):
+```json
+{ "question_id": 1001, "selected_option_ids": [2002] }
+```
+
+- choose_all (выбрать все подходящие):
+```json
+{ "question_id": 1002, "selected_option_ids": [2005, 2006] }
+```
+
+- open_question (свободный текст):
+```json
+{ "question_id": 1003, "text_answer": "y = mx + b; m — наклон, b — пересечение." }
+```
+
+- matching (сопоставление пар):
+```json
+{
+  "question_id": 1004,
+  "matching_answers_json": [
+    { "left": "Наклон", "right": "Скорость изменения" },
+    { "left": "Пересечение", "right": "Значение при x=0" }
+  ]
+}
+```
+
+### Завершить попытку (автопроверка)
+```http
+POST /api/assessments/attempts/{attempt_id}/submit/
+Authorization: Bearer <student_token>
+```
+Итоги: выставляются `score`, `max_score`, `percentage`, `is_completed: true`. Поле `is_graded: true`, если нет неоцененных открытых вопросов (их оценивает учитель вручную).
+
+### Просмотр результатов (отметить как просмотренные)
+```http
+POST /api/assessments/attempts/{attempt_id}/view-results/
+Authorization: Bearer <student_token>
+```
+Доступно после завершения попытки и, если задано, не раньше `reveal_results_at`.
+
+---
+
+## Бизнес-правила и нюансы
+
+- Доступность тестов: `is_published == true` и (`scheduled_at` не задано или уже наступило).
+- Попытки: ограничиваются `max_attempts` (если задано). При наличии незавершенной попытки повторный старт вернет её.
+- Автопроверка:
+  - multiple_choice — полный балл только при единственном правильном выбранном варианте и ровно одном выборе.
+  - choose_all — любая неверная опция даёт 0; без неверных — частичный балл пропорционален числу правильных.
+  - matching — частичный балл как доля совпавших пар × балл вопроса.
+  - open_question — всегда требует ручной оценки (`score` выставляет учитель через bulk-grade или по одному ответу).
+- Видимость результатов: если `reveal_results_at` пустое — сразу; иначе после указанного времени. Ученик может отметить просмотр через `view-results`.
+- Разграничение доступа по ролям: ученик видит свои попытки/ответы; учитель — свои тесты и их попытки/ответы; schooladmin — в пределах своей школы; superadmin — всё.
+
+---
+
+## Быстрые шпаргалки (curl)
+
+Создать тест:
+```bash
+curl -X POST http://localhost:8000/api/assessments/tests/ \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{
+    "course_section": 42,
+    "title": "Алгебра: Квиз 1",
+    "questions": [{"type":"multiple_choice","text":"2+2?","points":2,"position":1,
+      "options":[{"text":"3","is_correct":false,"position":1},{"text":"4","is_correct":true,"position":2}]}]
+  }'
+```
+
+Начать попытку:
+```bash
+curl -X POST http://localhost:8000/api/assessments/attempts/start/ \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"test_id":101}'
+```
+
+Ответить на вопрос (multiple_choice):
+```bash
+curl -X POST http://localhost:8000/api/assessments/attempts/9001/submit-answer/ \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"question_id":1001,"selected_option_ids":[2002]}'
+```
+
+Завершить попытку:
+```bash
+curl -X POST http://localhost:8000/api/assessments/attempts/9001/submit/ \
+  -H "Authorization: Bearer $TOKEN"
+```
+
