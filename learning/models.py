@@ -207,3 +207,42 @@ class AttendanceRecord(models.Model):
 
 
 # Create your models here.
+
+
+class EventType(models.TextChoices):
+    LESSON = "lesson", "Lesson"
+    SCHOOL_EVENT = "school_event", "School Event"
+    OTHER = "other", "Other"
+
+
+class Event(models.Model):
+    """Generic calendar Event used for timetable lessons and school-wide events."""
+    title = models.CharField(max_length=255)
+    description = models.TextField(null=True, blank=True)
+    type = models.CharField(max_length=32, choices=EventType.choices, default=EventType.OTHER)
+    start_at = models.DateTimeField()
+    end_at = models.DateTimeField(null=True, blank=True)
+    is_all_day = models.BooleanField(default=False)
+    location = models.CharField(max_length=255, null=True, blank=True)
+    
+    # Targeting
+    school = models.ForeignKey("schools.School", on_delete=models.CASCADE, related_name="events", null=True, blank=True)
+    subject_group = models.ForeignKey("courses.SubjectGroup", on_delete=models.CASCADE, related_name="events", null=True, blank=True)
+    course_section = models.ForeignKey("courses.CourseSection", on_delete=models.CASCADE, related_name="events", null=True, blank=True)
+    
+    # Audit
+    created_by = models.ForeignKey("users.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="created_events")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ["start_at", "id"]
+        indexes = [
+            models.Index(fields=["type", "start_at"]),
+            models.Index(fields=["school", "start_at"]),
+            models.Index(fields=["subject_group", "start_at"]),
+            models.Index(fields=["course_section", "start_at"]),
+        ]
+    
+    def __str__(self) -> str:
+        return f"{self.title} @ {self.start_at:%Y-%m-%d %H:%M}"

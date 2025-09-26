@@ -154,3 +154,15 @@ class AttendanceRecordAdmin(admin.ModelAdmin):
         return obj.attendance.subject_group.course.name
     attendance_course.short_description = 'Course'
     attendance_course.admin_order_field = 'attendance__subject_group__course__name'
+
+
+from .models import Event
+
+
+@admin.register(Event)
+class EventAdmin(admin.ModelAdmin):
+	list_display = ('title', 'type', 'start_at', 'end_at', 'school', 'subject_group', 'course_section')
+	list_filter = ('type', 'school')
+	search_fields = ('title', 'description')
+	autocomplete_fields = ('school', 'subject_group', 'course_section', 'created_by')
+	date_hierarchy = 'start_at'

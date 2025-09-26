@@ -40,6 +40,8 @@ class TestSerializer(serializers.ModelSerializer):
     is_available = serializers.SerializerMethodField()
     can_see_results = serializers.SerializerMethodField()
     can_attempt = serializers.SerializerMethodField()
+    is_deadline_passed = serializers.SerializerMethodField()
+    has_attempted = serializers.SerializerMethodField()
     
     class Meta:
         model = Test
@@ -49,7 +51,8 @@ class TestSerializer(serializers.ModelSerializer):
             'max_attempts', 'show_correct_answers', 'show_feedback', 'show_score_immediately',
             'course_section_title', 'course_name', 'course_code', 'teacher_username',
             'teacher_first_name', 'teacher_last_name', 'total_points', 'attempt_count',
-            'is_available', 'can_see_results', 'can_attempt', 'questions', 'created_at', 'updated_at'
+            'is_available', 'can_see_results', 'can_attempt', 'is_deadline_passed', 'has_attempted',
+            'questions', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
     
@@ -87,6 +90,18 @@ class TestSerializer(serializers.ModelSerializer):
                 return False
         
         return True
+    
+    def get_is_deadline_passed(self, obj):
+        if obj.scheduled_at:
+            return timezone.now() > obj.scheduled_at
+        return False
+    
+    def get_has_attempted(self, obj):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+        if not user or not user.is_authenticated:
+            return False
+        return obj.attempts.filter(student=user).exists()
 
 
 class AttemptSerializer(serializers.ModelSerializer):

@@ -1487,3 +1487,146 @@ curl -X POST http://localhost:8000/api/assessments/attempts/9001/submit/ \
   -H "Authorization: Bearer $TOKEN"
 ```
 
+
+## 📅 Events (Timetable and School Events)
+
+### Overview
+The Events API provides a unified way to manage timetable lessons and general school events. Events can target a whole `school`, a `subject_group`, or a specific `course_section`.
+
+- Types: `lesson`, `school_event`, `other`
+- Fields: `title`, `description`, `type`, `start_at`, `end_at`, `is_all_day`, `location`, `school`, `subject_group`, `course_section`
+- Role-aware access: students/teachers see relevant events; admins see their school; superadmins see all.
+
+Base URL prefix: `http://localhost:8000/api/`
+
+### List Events
+```http
+GET /api/events/
+Authorization: Bearer <token>
+
+# Optional filters
+GET /api/events/?type=lesson&subject_group=12&start_date=2025-09-01&end_date=2025-12-31
+```
+
+- Filters: `type`, `school`, `subject_group`, `course_section`, `start_date`, `end_date`
+- Search: `?search=<text>` over `title`/`description`
+- Ordering: `?ordering=start_at` (or `-start_at`, `title`, `end_at`)
+
+Response (paginated):
+```json
+{
+  "count": 3,
+  "next": null,
+  "previous": null,
+  "results": [
+    {
+      "id": 101,
+      "title": "Algebra lesson",
+      "description": "Regular class",
+      "type": "lesson",
+      "start_at": "2025-09-01T14:00:00Z",
+      "end_at": "2025-09-01T14:45:00Z",
+      "is_all_day": false,
+      "location": "Room 302",
+      "school": 1,
+      "subject_group": 12,
+      "course_section": null,
+      "created_by": 55,
+      "created_at": "2025-09-01T08:00:00Z",
+      "updated_at": "2025-09-01T08:00:00Z"
+    }
+  ]
+}
+```
+
+### Create Single Event
+```http
+POST /api/events/
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "title": "School Assembly",
+  "description": "Welcome back!",
+  "type": "school_event",
+  "start_at": "2025-09-02T10:00:00Z",
+  "end_at": "2025-09-02T11:00:00Z",
+  "is_all_day": false,
+  "location": "Main Hall",
+  "school": 1
+}
+```
+
+Response:
+```json
+{
+  "id": 202,
+  "title": "School Assembly",
+  "type": "school_event",
+  "start_at": "2025-09-02T10:00:00Z",
+  "end_at": "2025-09-02T11:00:00Z",
+  "school": 1,
+  "subject_group": null,
+  "course_section": null
+}
+```
+
+### Retrieve / Update / Delete
+```http
+GET    /api/events/{id}/
+PATCH  /api/events/{id}/
+DELETE /api/events/{id}/
+Authorization: Bearer <token>
+```
+
+### Create Recurring Lesson Events
+Generate weekly lesson events on chosen weekdays between dates. If `end_date` is omitted, it defaults to May 25 of the corresponding academic year (Sep 1 → May 25).
+
+```http
+POST /api/events/create-recurring/
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "title": "Algebra lesson",
+  "description": "Regular class",
+  "location": "Room 302",
+  "subject_group": 12,
+  "start_date": "2025-09-01",
+  "end_date": "2025-12-21",        // optional; defaults to academic-year May 25 if omitted
+  "weekdays": [0, 2, 4],             // 0=Mon, 2=Wed, 4=Fri
+  "start_time": "14:00:00",
+  "end_time": "14:45:00"
+}
+```
+
+Response:
+```json
+{ "created": 42 }
+```
+
+Validation rules:
+- `end_time` must be after `start_time`.
+- If provided, `end_date` must be on/after `start_date`.
+- At least one target must be set: `subject_group`, `course_section`, or `school`.
+
+Notes:
+- All created recurring events are of type `lesson`.
+- Role-based access limits which events a user can see:
+  - Student: events for their school and their subject groups
+  - Teacher: events for their school and the subject groups they teach
+  - School admin: events in their school
+  - Superadmin: all events
+
+### Filtering Examples
+```http
+# All lessons for a subject group in September
+GET /api/events/?type=lesson&subject_group=12&start_date=2025-09-01&end_date=2025-09-30
+
+# School-wide events only
+GET /api/events/?type=school_event&school=1
+
+# Search by title/description
+GET /api/events/?search=algebra
+```
+

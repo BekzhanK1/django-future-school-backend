@@ -34,6 +34,8 @@ class CourseSection(models.Model):
     subject_group = models.ForeignKey(SubjectGroup, on_delete=models.CASCADE, related_name="sections")
     title = models.CharField(max_length=255)
     position = models.PositiveIntegerField(default=0)
+    start_date = models.DateField(null=True, blank=True)
+    end_date = models.DateField(null=True, blank=True)
 
     class Meta:
         ordering = ["position", "id"]

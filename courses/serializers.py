@@ -29,7 +29,7 @@ class CourseSectionSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = CourseSection
-        fields = ['id', 'subject_group', 'title', 'position', 'resources', 'assignments', 'tests']
+        fields = ['id', 'subject_group', 'title', 'position', 'start_date', 'end_date', 'resources', 'assignments', 'tests']
     
     def get_resources(self, obj):
         from learning.serializers import ResourceTreeSerializer

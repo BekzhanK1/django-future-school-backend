@@ -28,7 +28,7 @@ class SubjectGroupAdmin(admin.ModelAdmin):
 
 @admin.register(CourseSection)
 class CourseSectionAdmin(admin.ModelAdmin):
-    list_display = ('title', 'subject_group', 'position')
+    list_display = ('title', 'subject_group', 'position', 'start_date', 'end_date')
     list_filter = ('subject_group__course', 'subject_group__classroom__school')
     search_fields = ('title', 'subject_group__course__name')
     autocomplete_fields = ('subject_group',)

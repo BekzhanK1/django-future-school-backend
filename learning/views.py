@@ -15,6 +15,12 @@ from .serializers import (
 from .role_permissions import RoleBasedPermission
 from schools.permissions import IsSuperAdmin, IsSchoolAdminOrSuperAdmin, IsTeacherOrAbove
 from users.models import UserRole
+from .models import Event
+from .serializers import EventSerializer
+
+from datetime import date, timedelta, datetime
+from django.utils import timezone
+from .models import EventType
 
 
 class ResourceViewSet(viewsets.ModelViewSet):
@@ -557,3 +563,116 @@ class AttendanceViewSet(viewsets.ModelViewSet):
         )
         
         return Response(list(students))
+
+
+
+from datetime import date, timedelta
+
+
+def academic_year_end_for(reference_date: date) -> date:
+	# Return May 25 for the academic year containing reference_date (Sep 1 to May 25)
+	if reference_date.month >= 9:
+		start_year = reference_date.year
+	else:
+		start_year = reference_date.year - 1
+	return date(start_year + 1, 5, 25)
+
+
+from .serializers import RecurringEventCreateSerializer
+
+
+class EventViewSet(viewsets.ModelViewSet):
+	queryset = Event.objects.select_related('school', 'subject_group__course', 'subject_group__classroom__school', 'course_section__subject_group__course').all()
+	serializer_class = EventSerializer
+	permission_classes = [RoleBasedPermission]
+	filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+	filterset_fields = ['type', 'school', 'subject_group', 'course_section']
+	search_fields = ['title', 'description']
+	ordering_fields = ['start_at', 'end_at', 'title']
+	ordering = ['start_at', 'id']
+	
+	def get_queryset(self):
+		queryset = super().get_queryset()
+		user = self.request.user
+		
+		if user.role == UserRole.STUDENT:
+			# Students: events for their school and their subject groups
+			student_school = user.school
+			student_subject_groups = user.classroom_users.values_list('classroom__subject_groups', flat=True)
+			queryset = queryset.filter(
+				Q(school=student_school) |
+				Q(subject_group__in=student_subject_groups)
+			)
+		elif user.role == UserRole.TEACHER:
+			# Teachers: events for their school and subject groups they teach
+			teacher_school = user.school
+			teacher_subject_groups = user.subject_groups.values_list('id', flat=True)
+			queryset = queryset.filter(
+				Q(school=teacher_school) |
+				Q(subject_group__in=teacher_subject_groups)
+			)
+		elif user.role == UserRole.SCHOOLADMIN:
+			queryset = queryset.filter(school=user.school)
+		# Superadmin: all
+		
+		# Optional date range filtering
+		start_date = self.request.query_params.get('start_date')
+		end_date = self.request.query_params.get('end_date')
+		if start_date:
+			queryset = queryset.filter(start_at__date__gte=start_date)
+		if end_date:
+			queryset = queryset.filter(start_at__date__lte=end_date)
+		
+		return queryset
+	
+	def perform_create(self, serializer):
+		serializer.save(created_by=self.request.user)
+	
+	@action(detail=False, methods=['post'], url_path='create-recurring')
+	def create_recurring(self, request):
+		serializer = RecurringEventCreateSerializer(data=request.data)
+		serializer.is_valid(raise_exception=True)
+		data = serializer.validated_data
+		
+		title = data['title']
+		description = data.get('description', '')
+		location = data.get('location', '')
+		is_all_day = data.get('is_all_day', False)
+		
+		start_date_val: date = data['start_date']
+		end_date_val: date | None = data.get('end_date')
+		if not end_date_val:
+			end_date_val = academic_year_end_for(start_date_val)
+		
+		weekdays = set(data['weekdays'])  # 0=Mon ... 6=Sun
+		start_time = data['start_time']
+		end_time = data['end_time']
+		
+		subject_group_id = data.get('subject_group')
+		course_section_id = data.get('course_section')
+		school_id = data.get('school')
+		
+		# Build date range occurrences
+		current = start_date_val
+		events_to_create = []
+		while current <= end_date_val:
+			if current.weekday() in weekdays:
+				start_at_dt = datetime.combine(current, start_time, tzinfo=timezone.get_current_timezone())
+				end_at_dt = datetime.combine(current, end_time, tzinfo=timezone.get_current_timezone())
+				events_to_create.append(Event(
+					title=title,
+					description=description,
+					type=EventType.LESSON,
+					start_at=start_at_dt,
+					end_at=end_at_dt,
+					is_all_day=is_all_day,
+					location=location,
+					school_id=school_id,
+					subject_group_id=subject_group_id,
+					course_section_id=course_section_id,
+					created_by=request.user,
+				))
+			current += timedelta(days=1)
+		
+		created = Event.objects.bulk_create(events_to_create)
+		return Response({'created': len(created)}, status=status.HTTP_201_CREATED)

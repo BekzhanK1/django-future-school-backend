@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Resource, Assignment, AssignmentAttachment, Submission, SubmissionAttachment, Grade, Attendance, AttendanceRecord, AttendanceStatus
+from .models import Resource, Assignment, AssignmentAttachment, Submission, SubmissionAttachment, Grade, Attendance, AttendanceRecord, Event
 
 
 class ResourceSerializer(serializers.ModelSerializer):
@@ -51,15 +51,42 @@ class AssignmentSerializer(serializers.ModelSerializer):
     teacher_username = serializers.CharField(source='teacher.username', read_only=True)
     submission_count = serializers.SerializerMethodField()
     attachments = AssignmentAttachmentSerializer(many=True, read_only=True)
+    is_available = serializers.SerializerMethodField()
+    is_deadline_passed = serializers.SerializerMethodField()
+    is_submitted = serializers.SerializerMethodField()
     
     class Meta:
         model = Assignment
         fields = ['id', 'course_section', 'teacher', 'title', 'description', 'due_at', 'max_grade', 'file',
                  'course_section_title', 'subject_group_course_name', 'subject_group_course_code', 
-                 'teacher_username', 'submission_count', 'attachments']
+                 'teacher_username', 'submission_count', 'attachments',
+                 'is_available', 'is_deadline_passed', 'is_submitted']
     
     def get_submission_count(self, obj):
         return obj.submissions.count()
+
+    def get_is_available(self, obj):
+        from django.utils import timezone
+        if not obj.due_at:
+            return True
+        return timezone.now() < obj.due_at
+
+    def get_is_deadline_passed(self, obj):
+        from django.utils import timezone
+        if not obj.due_at:
+            return False
+        return timezone.now() >= obj.due_at
+
+    def get_is_submitted(self, obj):
+        request = self.context.get('request')
+        if not request or not getattr(request, 'user', None):
+            return False
+        user = request.user
+        # Only meaningful for students
+        try:
+            return obj.submissions.filter(student=user).exists()
+        except Exception:
+            return False
 
 
 class SubmissionAttachmentSerializer(serializers.ModelSerializer):
@@ -257,3 +284,49 @@ class AttendanceMetricsSerializer(serializers.Serializer):
     subject_group_name = serializers.CharField()
     classroom_name = serializers.CharField()
     course_name = serializers.CharField()
+
+
+class EventSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Event
+        fields = [
+            'id', 'title', 'description', 'type', 'start_at', 'end_at', 'is_all_day', 'location',
+            'school', 'subject_group', 'course_section', 'created_by', 'created_at', 'updated_at'
+        ]
+
+
+from datetime import date, datetime, time
+
+from .models import EventType
+
+
+class RecurringEventCreateSerializer(serializers.Serializer):
+	title = serializers.CharField(max_length=255)
+	description = serializers.CharField(required=False, allow_blank=True)
+	location = serializers.CharField(required=False, allow_blank=True)
+	is_all_day = serializers.BooleanField(default=False)
+	
+	# Target
+	subject_group = serializers.IntegerField(required=False)
+	course_section = serializers.IntegerField(required=False)
+	school = serializers.IntegerField(required=False)
+	
+	# Recurrence
+	start_date = serializers.DateField()
+	end_date = serializers.DateField(required=False)
+	weekdays = serializers.ListField(child=serializers.IntegerField(min_value=0, max_value=6), allow_empty=False)
+	start_time = serializers.TimeField()
+	end_time = serializers.TimeField()
+	
+	def validate(self, attrs):
+		start_date = attrs['start_date']
+		end_date = attrs.get('end_date')
+		start_time = attrs['start_time']
+		end_time = attrs['end_time']
+		if end_time <= start_time:
+			raise serializers.ValidationError('end_time must be after start_time')
+		if end_date and end_date < start_date:
+			raise serializers.ValidationError('end_date must be on or after start_date')
+		if not attrs.get('subject_group') and not attrs.get('course_section') and not attrs.get('school'):
+			raise serializers.ValidationError('Provide at least one of subject_group, course_section, or school')
+		return attrs
