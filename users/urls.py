@@ -9,6 +9,7 @@ from .views import (
     UserViewSet,
     AuthSessionViewSet,
     PasswordResetTokenViewSet,
+    CheckAccessView,
 )
 
 router = DefaultRouter()
@@ -22,6 +23,7 @@ urlpatterns = [
     path("auth/change-password/", ChangePasswordView.as_view(), name="change_password"),
     path("auth/request-password-reset/", request_password_reset, name="request_password_reset"),
     path("auth/confirm-password-reset/", confirm_password_reset, name="confirm_password_reset"),
+    path("check-access/", CheckAccessView.as_view(), name="check_access"),
     path("", include(router.urls)),
 ]
 

@@ -6,9 +6,13 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from drf_spectacular.utils import extend_schema, OpenApiParameter
+from drf_spectacular.types import OpenApiTypes
 
 from .models import AuthSession, PasswordResetToken, User
 from .serializers import UserSerializer, UserCreateSerializer, AuthSessionSerializer, PasswordResetTokenSerializer
+from .access_checker import AccessChecker
+from .access_serializers import CheckAccessRequestSerializer, CheckAccessResponseSerializer
 from schools.permissions import IsSuperAdmin, IsSchoolAdminOrSuperAdmin
 
 
@@ -136,3 +140,57 @@ class PasswordResetTokenViewSet(ModelViewSet):
     queryset = PasswordResetToken.objects.select_related('user').all()
     serializer_class = PasswordResetTokenSerializer
     permission_classes = [IsSuperAdmin]
+
+
+class CheckAccessView(APIView):
+    """
+    Check if the authenticated user has access to a specific object.
+    
+    This endpoint allows frontend applications to verify user permissions
+    before attempting to access or display specific resources.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    
+    @extend_schema(
+        operation_id='check_access',
+        summary='Check User Access to Object',
+        description='Verify if the authenticated user has permission to access a specific object in the system.',
+        request=CheckAccessRequestSerializer,
+        responses={
+            200: CheckAccessResponseSerializer,
+            400: OpenApiTypes.OBJECT,
+            401: OpenApiTypes.OBJECT,
+        },
+        tags=['Access Control']
+    )
+    def post(self, request):
+        """
+        Check access to an object
+        
+        Request body:
+        {
+            "type": "test|subjectgroup|attendance|assignment|resource|coursesection|event|submission|school|classroom",
+            "id": 123
+        }
+        
+        Response:
+        {
+            "has_access": true/false,
+            "reason": "Explanation of access decision"
+        }
+        """
+        # Validate request data
+        serializer = CheckAccessRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        object_type = serializer.validated_data['type']
+        object_id = serializer.validated_data['id']
+        
+        # Check access using AccessChecker
+        result = AccessChecker.check_access(request.user, object_type, object_id)
+        
+        # Return response
+        response_serializer = CheckAccessResponseSerializer(data=result)
+        response_serializer.is_valid(raise_exception=True)
+        
+        return Response(response_serializer.data, status=status.HTTP_200_OK)

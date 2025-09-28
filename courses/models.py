@@ -41,7 +41,7 @@ class CourseSection(models.Model):
         ordering = ["position", "id"]
 
     def __str__(self) -> str:
-        return self.title
+        return f"{self.title} - {self.subject_group}"
 
     def save(self, *args, **kwargs):
         # Auto-increment position within subject_group
