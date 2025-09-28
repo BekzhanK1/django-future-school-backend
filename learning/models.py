@@ -13,6 +13,7 @@ class ResourceType(models.TextChoices):
     WORD = "word", "Word"
     EXCEL = "excel", "Excel"
     POWERPOINT = "powerpoint", "Powerpoint"
+    LESSON_LINK = "lesson_link", "Lesson Link"
 
 
 class Resource(models.Model):

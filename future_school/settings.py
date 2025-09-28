@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 from pathlib import Path
 from dotenv import load_dotenv
 import os
+from datetime import timedelta
 
 load_dotenv()
 
@@ -54,6 +55,7 @@ INSTALLED_APPS = [
     "learning",
     "lessons",
     "assessments",
+    "microsoft_graph",
 ]
 
 MIDDLEWARE = [
@@ -155,6 +157,17 @@ REST_FRAMEWORK = {
         "rest_framework.permissions.IsAuthenticated",
     ),
 }
+
+
+if DEBUG:
+    SIMPLE_JWT = {
+        "ACCESS_TOKEN_LIFETIME": timedelta(hours=2),
+    }
+else:
+    SIMPLE_JWT = {
+        "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
+    }
+
 
 SPECTACULAR_SETTINGS = {
     "TITLE": "Future School API",

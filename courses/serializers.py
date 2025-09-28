@@ -1,6 +1,8 @@
 from rest_framework import serializers
 from datetime import datetime, timedelta
 from .models import Course, SubjectGroup, CourseSection
+from microsoft_graph.serializers import ShortOnlineMeetingSerializer
+
 
 
 class CourseSerializer(serializers.ModelSerializer):
@@ -15,11 +17,19 @@ class SubjectGroupSerializer(serializers.ModelSerializer):
     classroom_display = serializers.CharField(source='classroom.__str__', read_only=True)
     teacher_username = serializers.CharField(source='teacher.username', read_only=True)
     teacher_email = serializers.CharField(source='teacher.email', read_only=True)
+    external_id = serializers.CharField(read_only=True)
+    online_meeting = serializers.SerializerMethodField()
     
+    def get_online_meeting(self, obj):
+        online_meeting = getattr(obj, 'online_meeting', None)
+        if online_meeting is not None:
+            return ShortOnlineMeetingSerializer(online_meeting, context=self.context).data
+        return None
+
     class Meta:
         model = SubjectGroup
         fields = ['id', 'course', 'classroom', 'teacher', 'course_name', 'course_code', 
-                 'classroom_display', 'teacher_username', 'teacher_email']
+                 'classroom_display', 'teacher_username', 'teacher_email', 'external_id','online_meeting', ]
 
 
 class CourseSectionSerializer(serializers.ModelSerializer):
