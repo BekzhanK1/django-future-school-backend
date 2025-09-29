@@ -249,6 +249,10 @@ class SubmissionViewSet(viewsets.ModelViewSet):
         # Superadmins can see all submissions (default queryset)
         
         return queryset
+    
+    def perform_create(self, serializer):
+        # Automatically set the student to the authenticated user
+        serializer.save(student=self.request.user)
 
 
 class SubmissionAttachmentViewSet(viewsets.ModelViewSet):

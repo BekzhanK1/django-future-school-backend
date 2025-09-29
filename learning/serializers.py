@@ -106,6 +106,7 @@ class SubmissionSerializer(serializers.ModelSerializer):
     grade_feedback = serializers.SerializerMethodField()
     graded_at = serializers.SerializerMethodField()
     attachments = SubmissionAttachmentSerializer(many=True, read_only=True)
+    student = serializers.PrimaryKeyRelatedField(read_only=True)
     
     class Meta:
         model = Submission

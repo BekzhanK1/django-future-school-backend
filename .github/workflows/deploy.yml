@@ -1,4 +1,4 @@
-name: Notify on push
+name: Deploy backend
 
 on:
   push:
@@ -6,18 +6,37 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: notify-backend
+  group: deploy-backend
   cancel-in-progress: true
 
 jobs:
-  notify:
+  deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
 
     steps:
+      # mark job start to compute duration later
       - name: Start timer
         id: t0
         run: echo "start=$(date +%s)" >> $GITHUB_OUTPUT
+
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          port: 22
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd ~/future-school/future-school-backend
+            docker compose down || true
+            git fetch --all
+            git checkout main || git checkout -b main
+            git pull origin main
+            docker compose up --build -d
+            docker system prune -f || true
 
       - name: Notify Telegram (HTML)
         if: ${{ always() }}
@@ -29,7 +48,7 @@ jobs:
           SHA: ${{ github.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           START_TS: ${{ steps.t0.outputs.start }}
-          STATUS: ${{ job.status }}
+          STATUS: ${{ job.status }}   # success | failure | cancelled
         run: |
           set -euo pipefail
           END_TS="$(date +%s)"
@@ -39,11 +58,11 @@ jobs:
           SHORT_SHA="${SHA::7}"
 
           if [ "$STATUS" = "success" ]; then
-            ICON="✅"; TITLE="Уведомление сработало успешно"
+            ICON="✅"; TITLE="Деплой выполнен успешно"
           elif [ "$STATUS" = "cancelled" ]; then
-            ICON="⚠️"; TITLE="Действие отменено"
+            ICON="⚠️"; TITLE="Деплой отменён"
           else
-            ICON="❌"; TITLE="Сбой уведомления"
+            ICON="❌"; TITLE="Сбой деплоя"
           fi
 
           TEXT="$ICON <b>$TITLE</b>
@@ -59,4 +78,3 @@ jobs:
             -d text="$TEXT" \
             -d parse_mode="HTML" \
             -d disable_web_page_preview=true
-
