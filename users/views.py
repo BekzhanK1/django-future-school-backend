@@ -15,6 +15,7 @@ from .access_checker import AccessChecker
 from .access_serializers import CheckAccessRequestSerializer, CheckAccessResponseSerializer
 from schools.permissions import IsSuperAdmin, IsSchoolAdminOrSuperAdmin
 from common.tasks import send_email_task
+from future_school.settings import FRONTEND_URL
 
 
 class LoginView(TokenObtainPairView):
@@ -73,6 +74,13 @@ class ConfirmPasswordResetSerializer(serializers.Serializer):
     new_password = serializers.CharField()
 
 
+@extend_schema(
+    operation_id='request_password_reset',
+    summary='Request password reset',
+    request=RequestPasswordResetSerializer,
+    responses={201: PasswordResetTokenSerializer, 204: None},
+    tags=['auth']
+)
 @api_view(["POST"])
 @permission_classes([permissions.AllowAny])
 def request_password_reset(request):
@@ -87,7 +95,7 @@ def request_password_reset(request):
         expires_at=timezone.now() + timezone.timedelta(hours=1),
     )
     # Send reset email asynchronously
-    reset_link = f"http://localhost:3000/reset-password?token={token.token}"
+    reset_link = f"{FRONTEND_URL}/reset-password?token={token.token}"
     subject = "Password Reset Instructions"
     text_body = (
         "We received a request to reset your password.\n\n"
@@ -105,6 +113,13 @@ def request_password_reset(request):
     return Response({"token": token.token}, status=status.HTTP_201_CREATED)
 
 
+@extend_schema(
+    operation_id='confirm_password_reset',
+    summary='Confirm password reset',
+    request=ConfirmPasswordResetSerializer,
+    responses={204: None, 400: OpenApiTypes.OBJECT},
+    tags=['auth']
+)
 @api_view(["POST"])
 @permission_classes([permissions.AllowAny])
 def confirm_password_reset(request):

@@ -16,6 +16,8 @@ from .serializers import (
 from schools.permissions import IsSuperAdmin, IsSchoolAdminOrSuperAdmin, IsTeacherOrAbove
 from learning.role_permissions import RoleBasedPermission
 from users.models import UserRole
+from drf_spectacular.utils import extend_schema
+from drf_spectacular.types import OpenApiTypes
 
 
 class TestViewSet(viewsets.ModelViewSet):
@@ -150,6 +152,31 @@ class AttemptViewSet(viewsets.ModelViewSet):
         
         return queryset
     
+    @extend_schema(
+        operation_id='attempts_create',
+        summary='Create or resume an attempt',
+        request=CreateAttemptSerializer,
+        responses={201: AttemptSerializer, 400: OpenApiTypes.OBJECT},
+        tags=['Attempts']
+    )
+    def create(self, request, *args, **kwargs):
+        """Create (or resume) an attempt using the authenticated user.
+        Mirrors the logic of the start_attempt action but on POST /attempts/.
+        """
+        serializer = CreateAttemptSerializer(data=request.data, context={'request': request})
+        if serializer.is_valid():
+            attempt = serializer.save()
+            response_serializer = AttemptSerializer(attempt, context={'request': request})
+            return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @extend_schema(
+        operation_id='attempts_start',
+        summary='Start or resume an attempt',
+        request=CreateAttemptSerializer,
+        responses={201: AttemptSerializer, 400: OpenApiTypes.OBJECT},
+        tags=['Attempts']
+    )
     @action(detail=False, methods=['post'], url_path='start')
     def start_attempt(self, request):
         """Start a new test attempt"""
@@ -160,6 +187,13 @@ class AttemptViewSet(viewsets.ModelViewSet):
             return Response(response_serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
+    @extend_schema(
+        operation_id='attempts_submit',
+        summary='Submit attempt for grading',
+        request=None,
+        responses={200: AttemptSerializer, 400: OpenApiTypes.OBJECT},
+        tags=['Attempts']
+    )
     @action(detail=True, methods=['post'], url_path='submit')
     def submit_attempt(self, request, pk=None):
         """Submit a test attempt"""
@@ -169,6 +203,21 @@ class AttemptViewSet(viewsets.ModelViewSet):
             return Response({'error': 'Attempt already submitted'}, status=status.HTTP_400_BAD_REQUEST)
         
         with transaction.atomic():
+            # Create zero-score answers for unanswered questions
+            answered_question_ids = set(
+                attempt.answers.values_list('question_id', flat=True)
+            )
+            all_questions = attempt.test.questions.all()
+            for question in all_questions:
+                if question.id not in answered_question_ids:
+                    Answer.objects.create(
+                        attempt=attempt,
+                        question=question,
+                        score=0,
+                        max_score=question.points,
+                        is_correct=False,
+                    )
+
             # Auto-grade questions that can be auto-graded
             total_score = 0
             max_score = 0
@@ -201,7 +250,7 @@ class AttemptViewSet(viewsets.ModelViewSet):
             )
             attempt.save()
             
-            # Calculate percentage
+            # Calculate percentage based on all questions (including previously unanswered)
             if max_score > 0:
                 attempt.percentage = (total_score / max_score) * 100
                 attempt.save()
@@ -209,6 +258,13 @@ class AttemptViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(attempt)
         return Response(serializer.data)
     
+    @extend_schema(
+        operation_id='attempts_submit_answer',
+        summary='Submit or update an answer',
+        request=SubmitAnswerSerializer,
+        responses={201: AnswerSerializer, 400: OpenApiTypes.OBJECT},
+        tags=['Attempts']
+    )
     @action(detail=True, methods=['post'], url_path='submit-answer')
     def submit_answer(self, request, pk=None):
         """Submit an answer for a question in an attempt"""
@@ -255,6 +311,13 @@ class AttemptViewSet(viewsets.ModelViewSet):
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
+    @extend_schema(
+        operation_id='attempts_view_results',
+        summary='Mark results as viewed',
+        request=None,
+        responses={200: AttemptSerializer, 400: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT},
+        tags=['Attempts']
+    )
     @action(detail=True, methods=['post'], url_path='view-results')
     def view_results(self, request, pk=None):
         """Mark results as viewed by student"""

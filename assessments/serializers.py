@@ -47,6 +47,8 @@ class TestSerializer(serializers.ModelSerializer):
     can_attempt = serializers.SerializerMethodField()
     is_deadline_passed = serializers.SerializerMethodField()
     has_attempted = serializers.SerializerMethodField()
+    my_active_attempt_id = serializers.SerializerMethodField()
+    my_latest_attempt_can_view_results = serializers.SerializerMethodField()
     
     class Meta:
         model = Test
@@ -58,6 +60,7 @@ class TestSerializer(serializers.ModelSerializer):
             'classroom_name', 'classroom_grade', 'classroom_letter', 'teacher_username',
             'teacher_first_name', 'teacher_last_name', 'total_points', 'attempt_count',
             'is_available', 'can_see_results', 'can_attempt', 'is_deadline_passed', 'has_attempted',
+            'my_active_attempt_id', 'my_latest_attempt_can_view_results',
             'questions', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
@@ -109,6 +112,27 @@ class TestSerializer(serializers.ModelSerializer):
             return False
         return obj.attempts.filter(student=user).exists()
 
+    def get_my_active_attempt_id(self, obj):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+        if not user or not user.is_authenticated:
+            return None
+        try:
+            active_attempt = obj.attempts.filter(student=user, submitted_at__isnull=True).order_by('-started_at').first()
+            return active_attempt.id if active_attempt else None
+        except Exception:
+            return None
+
+    def get_my_latest_attempt_can_view_results(self, obj):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+        if not user or not user.is_authenticated:
+            return False
+        latest_attempt = obj.attempts.filter(student=user).order_by('-submitted_at', '-attempt_number', '-started_at').first()
+        if not latest_attempt:
+            return False
+        return bool(latest_attempt.can_view_results)
+
 
 class AttemptSerializer(serializers.ModelSerializer):
     student_username = serializers.CharField(source='student.username', read_only=True)
@@ -129,7 +153,7 @@ class AttemptSerializer(serializers.ModelSerializer):
             'student_username', 'student_email', 'student_first_name', 'student_last_name',
             'test_title', 'can_view_results', 'time_spent_minutes', 'answers'
         ]
-        read_only_fields = ['id', 'attempt_number', 'started_at', 'submitted_at', 'graded_at', 'score', 'max_score', 'percentage', 'is_completed', 'is_graded', 'results_viewed_at']
+        read_only_fields = ['id', 'student', 'attempt_number', 'started_at', 'submitted_at', 'graded_at', 'score', 'max_score', 'percentage', 'is_completed', 'is_graded', 'results_viewed_at']
     
     def get_answers(self, obj):
         answers = obj.answers.all().order_by('question__position')
@@ -155,14 +179,11 @@ class AnswerSerializer(serializers.ModelSerializer):
 
 
 class CreateAttemptSerializer(serializers.Serializer):
-    test_id = serializers.IntegerField()
+    test = serializers.PrimaryKeyRelatedField(queryset=Test.objects.all())
     
-    def validate_test_id(self, value):
-        try:
-            test = Test.objects.get(id=value)
-        except Test.DoesNotExist:
-            raise serializers.ValidationError("Test does not exist")
-        
+    def validate_test(self, value):
+        # value is a Test instance
+        test = value
         if not test.is_published:
             raise serializers.ValidationError("Test is not published")
         
@@ -179,12 +200,12 @@ class CreateAttemptSerializer(serializers.Serializer):
         return value
     
     def create(self, validated_data):
-        test_id = validated_data['test_id']
+        test = validated_data['test']
         student = self.context['request'].user
         
         # Check if student already has an active attempt
         existing_attempt = Attempt.objects.filter(
-            test_id=test_id, 
+            test=test, 
             student=student, 
             submitted_at__isnull=True
         ).first()
@@ -194,14 +215,14 @@ class CreateAttemptSerializer(serializers.Serializer):
         
         # Get next attempt number
         last_attempt = Attempt.objects.filter(
-            test_id=test_id, 
+            test=test, 
             student=student
         ).order_by('-attempt_number').first()
         
         attempt_number = (last_attempt.attempt_number + 1) if last_attempt else 1
         
         return Attempt.objects.create(
-            test_id=test_id,
+            test=test,
             student=student,
             attempt_number=attempt_number
         )
