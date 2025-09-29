@@ -277,8 +277,23 @@ class CreateQuestionSerializer(serializers.ModelSerializer):
         return question
 
 
+class NestedQuestionCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating questions nested under Test create.
+    Does not require or accept the `test` field; it will be set by the parent.
+    """
+    options = OptionSerializer(many=True, required=False)
+
+    class Meta:
+        model = Question
+        fields = [
+            'type', 'text', 'points', 'position',
+            'correct_answer_text', 'sample_answer', 'matching_pairs_json', 'options'
+        ]
+
+
 class CreateTestSerializer(serializers.ModelSerializer):
-    questions = CreateQuestionSerializer(many=True, required=False)
+    # Use nested question serializer that doesn't require `test` field
+    questions = NestedQuestionCreateSerializer(many=True, required=False)
     course_section = serializers.PrimaryKeyRelatedField(
         queryset=CourseSection.objects.all(), 
         required=False,

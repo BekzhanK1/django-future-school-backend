@@ -77,6 +77,19 @@ class TestViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(test)
         return Response(serializer.data)
 
+    @action(detail=False, methods=['post'], url_path='create-full')
+    def create_full(self, request):
+        """Create a test and its questions in a single request.
+        Payload matches CreateTestSerializer, with `questions` as a list
+        where each question omits the `test` field.
+        """
+        serializer = CreateTestSerializer(data=request.data, context={'request': request})
+        if serializer.is_valid():
+            test = serializer.save()
+            response = TestSerializer(test, context={'request': request})
+            return Response(response.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 
 class OptionViewSet(viewsets.ModelViewSet):
     queryset = Option.objects.select_related('question__test').all()
