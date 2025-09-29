@@ -1209,6 +1209,44 @@ If you need help with the API, check the Swagger documentation or contact the ba
 ---
 
 **Happy coding! 🚀**
+## ⚙️ Environment (Email & Celery)
+
+Add these to your `.env`:
+
+```env
+GMAIL_EMAIL=your_gmail_address@gmail.com
+GMAIL_PASSWORD=your_gmail_app_password
+DEFAULT_FROM_EMAIL=Future School <your_gmail_address@gmail.com>
+CELERY_BROKER_URL=redis://localhost:6379/0
+CELERY_RESULT_BACKEND=redis://localhost:6379/0
+CELERY_TASK_ALWAYS_EAGER=false
+```
+
+### Celery commands
+
+```bash
+# Worker
+celery -A future_school.celery.celery_app worker -l info
+
+# Beat (optional if you add periodic tasks)
+celery -A future_school.celery.celery_app beat -l info
+```
+
+### Docker Compose (Redis + Celery)
+
+```bash
+# Build images
+docker compose build
+
+# Start Django + Redis + Celery worker + Beat
+docker compose up -d
+
+# View logs
+docker compose logs -f celery-worker
+docker compose logs -f celery-beat
+docker compose logs -f django
+```
+
 
 ---
 

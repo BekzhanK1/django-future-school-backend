@@ -33,7 +33,7 @@ class TestSerializer(serializers.ModelSerializer):
     course_section_title = serializers.CharField(source='course_section.title', read_only=True)
     course_name = serializers.CharField(source='course_section.subject_group.course.name', read_only=True)
     course_code = serializers.CharField(source='course_section.subject_group.course.course_code', read_only=True)
-    subject_group_id = serializers.IntegerField(source='course_section.subject_group.id', read_only=True)
+    subject_group = serializers.IntegerField(source='course_section.subject_group.id', read_only=True)
     classroom_name = serializers.CharField(source='course_section.subject_group.classroom.__str__', read_only=True)
     classroom_grade = serializers.IntegerField(source='course_section.subject_group.classroom.grade', read_only=True)
     classroom_letter = serializers.CharField(source='course_section.subject_group.classroom.letter', read_only=True)
@@ -54,7 +54,7 @@ class TestSerializer(serializers.ModelSerializer):
             'id', 'course_section', 'teacher', 'title', 'description', 'is_published',
             'scheduled_at', 'reveal_results_at', 'time_limit_minutes', 'allow_multiple_attempts',
             'max_attempts', 'show_correct_answers', 'show_feedback', 'show_score_immediately',
-            'course_section_title', 'course_name', 'course_code', 'subject_group_id',
+            'course_section_title', 'course_name', 'course_code', 'subject_group',
             'classroom_name', 'classroom_grade', 'classroom_letter', 'teacher_username',
             'teacher_first_name', 'teacher_last_name', 'total_points', 'attempt_count',
             'is_available', 'can_see_results', 'can_attempt', 'is_deadline_passed', 'has_attempted',

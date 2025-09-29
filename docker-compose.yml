@@ -8,6 +8,45 @@ services:
       - ./media:/app/media
     environment:
       - DEBUG=1
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
     command: >
       sh -c "python manage.py migrate && 
              python manage.py runserver 0.0.0.0:8000"
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --save 60 1 --loglevel warning
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+
+  celery-worker:
+    build: .
+    depends_on:
+      - redis
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - ./data:/app/data
+      - ./media:/app/media
+    command: >
+      sh -c "celery -A future_school.celery.celery_app worker -l info"
+
+  celery-beat:
+    build: .
+    depends_on:
+      - redis
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - ./data:/app/data
+      - ./media:/app/media
+    command: >
+      sh -c "celery -A future_school.celery.celery_app beat -l info"
+
+volumes:
+  redis-data:

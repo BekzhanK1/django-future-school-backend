@@ -14,6 +14,7 @@ from .serializers import UserSerializer, UserCreateSerializer, AuthSessionSerial
 from .access_checker import AccessChecker
 from .access_serializers import CheckAccessRequestSerializer, CheckAccessResponseSerializer
 from schools.permissions import IsSuperAdmin, IsSchoolAdminOrSuperAdmin
+from common.tasks import send_email_task
 
 
 class LoginView(TokenObtainPairView):
@@ -85,7 +86,22 @@ def request_password_reset(request):
         user=user,
         expires_at=timezone.now() + timezone.timedelta(hours=1),
     )
-    # TODO: email token.token to user
+    # Send reset email asynchronously
+    reset_link = f"http://localhost:3000/reset-password?token={token.token}"
+    subject = "Password Reset Instructions"
+    text_body = (
+        "We received a request to reset your password.\n\n"
+        f"Use this token: {token.token}\n"
+        f"Or click the link: {reset_link}\n\n"
+        "If you did not request this, you can ignore this email."
+    )
+    html_body = (
+        f"<p>We received a request to reset your password.</p>"
+        f"<p><strong>Token:</strong> {token.token}</p>"
+        f"<p><a href=\"{reset_link}\">Reset your password</a></p>"
+        f"<p>If you did not request this, you can ignore this email.</p>"
+    )
+    send_email_task.delay(subject, text_body, [user.email], html_body)
     return Response({"token": token.token}, status=status.HTTP_201_CREATED)
 
 
