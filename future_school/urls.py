@@ -27,5 +27,5 @@ urlpatterns = [
     path('api/', include('courses.urls')),
     path('api/', include('learning.urls')),
     path('api/', include('assessments.urls')),
-    path('api/microsoft/', include('microsoft_graph.urls')),
+    # path('api/microsoft/', include('microsoft_graph.urls')),
 ]

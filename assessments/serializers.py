@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from django.utils import timezone
 from .models import Test, Question, Option, Attempt, Answer, QuestionType
+from courses.models import CourseSection, SubjectGroup
 
 
 class OptionSerializer(serializers.ModelSerializer):
@@ -32,6 +33,10 @@ class TestSerializer(serializers.ModelSerializer):
     course_section_title = serializers.CharField(source='course_section.title', read_only=True)
     course_name = serializers.CharField(source='course_section.subject_group.course.name', read_only=True)
     course_code = serializers.CharField(source='course_section.subject_group.course.course_code', read_only=True)
+    subject_group_id = serializers.IntegerField(source='course_section.subject_group.id', read_only=True)
+    classroom_name = serializers.CharField(source='course_section.subject_group.classroom.__str__', read_only=True)
+    classroom_grade = serializers.IntegerField(source='course_section.subject_group.classroom.grade', read_only=True)
+    classroom_letter = serializers.CharField(source='course_section.subject_group.classroom.letter', read_only=True)
     teacher_username = serializers.CharField(source='teacher.username', read_only=True)
     teacher_first_name = serializers.CharField(source='teacher.first_name', read_only=True)
     teacher_last_name = serializers.CharField(source='teacher.last_name', read_only=True)
@@ -49,7 +54,8 @@ class TestSerializer(serializers.ModelSerializer):
             'id', 'course_section', 'teacher', 'title', 'description', 'is_published',
             'scheduled_at', 'reveal_results_at', 'time_limit_minutes', 'allow_multiple_attempts',
             'max_attempts', 'show_correct_answers', 'show_feedback', 'show_score_immediately',
-            'course_section_title', 'course_name', 'course_code', 'teacher_username',
+            'course_section_title', 'course_name', 'course_code', 'subject_group_id',
+            'classroom_name', 'classroom_grade', 'classroom_letter', 'teacher_username',
             'teacher_first_name', 'teacher_last_name', 'total_points', 'attempt_count',
             'is_available', 'can_see_results', 'can_attempt', 'is_deadline_passed', 'has_attempted',
             'questions', 'created_at', 'updated_at'
@@ -273,18 +279,82 @@ class CreateQuestionSerializer(serializers.ModelSerializer):
 
 class CreateTestSerializer(serializers.ModelSerializer):
     questions = CreateQuestionSerializer(many=True, required=False)
+    course_section = serializers.PrimaryKeyRelatedField(
+        queryset=CourseSection.objects.all(), 
+        required=False,
+        allow_null=True
+    )
+    subject_group = serializers.PrimaryKeyRelatedField(
+        queryset=SubjectGroup.objects.all(),
+        required=False,
+        allow_null=True
+    )
     
     class Meta:
         model = Test
         fields = [
-            'course_section', 'title', 'description', 'is_published',
+            'course_section', 'subject_group', 'title', 'description', 'is_published',
             'scheduled_at', 'reveal_results_at', 'time_limit_minutes',
             'allow_multiple_attempts', 'max_attempts', 'show_correct_answers',
             'show_feedback', 'show_score_immediately', 'questions'
         ]
     
+    def validate(self, data):
+        """Auto-assign course_section based on scheduled_at and subject_group if not provided"""
+        course_section = data.get('course_section')
+        subject_group = data.get('subject_group')
+        scheduled_at = data.get('scheduled_at')
+        
+        # If course_section is not provided but scheduled_at is, try to auto-assign
+        if not course_section and scheduled_at:
+            from django.utils import timezone
+            
+            # Convert scheduled_at to date for comparison
+            test_date = scheduled_at.date() if hasattr(scheduled_at, 'date') else scheduled_at
+            
+            # Build query to find course section that contains this date
+            query = CourseSection.objects.filter(
+                start_date__lte=test_date,
+                end_date__gte=test_date
+            )
+            
+            # If subject_group is provided, filter by it
+            if subject_group:
+                query = query.filter(subject_group=subject_group)
+            
+            course_section = query.first()
+            
+            if course_section:
+                data['course_section'] = course_section
+            else:
+                error_msg = f"No course section found for the scheduled date {test_date}"
+                if subject_group:
+                    error_msg += f" in subject group {subject_group.id}"
+                error_msg += ". Please provide a course_section or ensure there's a section with start_date <= {test_date} <= end_date."
+                raise serializers.ValidationError(error_msg)
+        
+        # If neither course_section nor scheduled_at is provided, raise error
+        if not course_section:
+            raise serializers.ValidationError(
+                "Either course_section must be provided or scheduled_at must be provided "
+                "to auto-assign a course section."
+            )
+        
+        # Remove subject_group from data since it's not a field on Test model
+        if 'subject_group' in data:
+            del data['subject_group']
+        
+        return data
+    
     def create(self, validated_data):
         questions_data = validated_data.pop('questions', [])
+        
+        # Set teacher from context if not provided
+        if 'teacher' not in validated_data:
+            request = self.context.get('request')
+            if request and hasattr(request, 'user'):
+                validated_data['teacher'] = request.user
+        
         test = Test.objects.create(**validated_data)
         
         for question_data in questions_data:
