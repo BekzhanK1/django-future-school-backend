@@ -32,9 +32,10 @@ jobs:
             set -euo pipefail
             cd ~/future-school/future-school-backend
             # Ensure media directory exists and is writable by deploy user
+            # Remove old root-owned dir if present (no sudo needed if parent is writable)
+            rm -rf ~/future-school/future-school-backend/media || true
             mkdir -p ~/future-school/future-school-backend/media/submissions
             chmod 755 ~/future-school/future-school-backend/media || true
-            chown -R "$(whoami)":"$(whoami)" ~/future-school/future-school-backend/media || true
             docker compose down || true
             git fetch --all
             git checkout main || git checkout -b main
