@@ -48,6 +48,7 @@ class TestSerializer(serializers.ModelSerializer):
     is_deadline_passed = serializers.SerializerMethodField()
     has_attempted = serializers.SerializerMethodField()
     my_active_attempt_id = serializers.SerializerMethodField()
+    last_submitted_attempt_id = serializers.SerializerMethodField()
     my_latest_attempt_can_view_results = serializers.SerializerMethodField()
     
     class Meta:
@@ -60,7 +61,7 @@ class TestSerializer(serializers.ModelSerializer):
             'classroom_name', 'classroom_grade', 'classroom_letter', 'teacher_username',
             'teacher_first_name', 'teacher_last_name', 'total_points', 'attempt_count',
             'is_available', 'can_see_results', 'can_attempt', 'is_deadline_passed', 'has_attempted',
-            'my_active_attempt_id', 'my_latest_attempt_can_view_results',
+            'my_active_attempt_id', 'last_submitted_attempt_id', 'my_latest_attempt_can_view_results',
             'questions', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
@@ -120,6 +121,20 @@ class TestSerializer(serializers.ModelSerializer):
         try:
             active_attempt = obj.attempts.filter(student=user, submitted_at__isnull=True).order_by('-started_at').first()
             return active_attempt.id if active_attempt else None
+        except Exception:
+            return None
+
+    def get_last_submitted_attempt_id(self, obj):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+        if not user or not user.is_authenticated:
+            return None
+        try:
+            last_finished = obj.attempts.filter(
+                student=user,
+                submitted_at__isnull=False
+            ).order_by('-submitted_at', '-attempt_number', '-started_at').first()
+            return last_finished.id if last_finished else None
         except Exception:
             return None
 
