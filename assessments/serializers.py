@@ -176,9 +176,7 @@ class AttemptSerializer(serializers.ModelSerializer):
 
 
 class AnswerSerializer(serializers.ModelSerializer):
-    question_text = serializers.CharField(source='question.text', read_only=True)
-    question_type = serializers.CharField(source='question.type', read_only=True)
-    question_points = serializers.IntegerField(source='question.points', read_only=True)
+    question = QuestionSerializer(read_only=True)
     selected_options = OptionSerializer(many=True, read_only=True)
     max_score = serializers.ReadOnlyField()
     is_correct = serializers.ReadOnlyField()
@@ -188,7 +186,7 @@ class AnswerSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'attempt', 'question', 'selected_options', 'text_answer', 'matching_answers_json',
             'score', 'max_score', 'is_correct', 'teacher_feedback', 'auto_feedback',
-            'question_text', 'question_type', 'question_points', 'created_at', 'updated_at'
+            'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
