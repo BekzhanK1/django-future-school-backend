@@ -6,8 +6,15 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 
 from .models import School, Classroom, ClassroomUser
-from .serializers import SchoolSerializer, ClassroomSerializer, ClassroomUserSerializer, BulkClassroomUserSerializer
+from .serializers import (
+    SchoolSerializer, 
+    ClassroomSerializer, 
+    ClassroomDetailSerializer,
+    ClassroomUserSerializer, 
+    BulkClassroomUserSerializer
+)
 from .permissions import IsSuperAdmin, IsSchoolAdminOrSuperAdmin, IsTeacherOrAbove
+from users.models import User
 
 
 class SchoolViewSet(viewsets.ModelViewSet):
@@ -21,7 +28,7 @@ class SchoolViewSet(viewsets.ModelViewSet):
 
 
 class ClassroomViewSet(viewsets.ModelViewSet):
-    queryset = Classroom.objects.select_related('school').all()
+    queryset = Classroom.objects.select_related('school').prefetch_related('classroom_users__user').all()
     serializer_class = ClassroomSerializer
     permission_classes = [IsSuperAdmin]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -29,6 +36,84 @@ class ClassroomViewSet(viewsets.ModelViewSet):
     search_fields = ['letter', 'school__name']
     ordering_fields = ['grade', 'letter', 'school__name']
     ordering = ['school__name', 'grade', 'letter']
+    
+    def get_serializer_class(self):
+        # Use detailed serializer for retrieve action (get single classroom)
+        if self.action == 'retrieve':
+            return ClassroomDetailSerializer
+        return ClassroomSerializer
+    
+    @action(detail=True, methods=['post'], url_path='add-student')
+    def add_student(self, request, pk=None):
+        """Add a single student to a classroom"""
+        classroom = self.get_object()
+        student_id = request.data.get('student_id')
+        
+        if not student_id:
+            return Response(
+                {'error': 'student_id is required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            student = User.objects.get(id=student_id, role='student')
+        except User.DoesNotExist:
+            return Response(
+                {'error': 'Student not found'}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Check if student is already in a classroom
+        existing_classroom = ClassroomUser.objects.filter(user=student).first()
+        if existing_classroom:
+            return Response(
+                {'error': f'Student is already in classroom {existing_classroom.classroom}'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Add student to classroom
+        classroom_user = ClassroomUser.objects.create(
+            classroom=classroom,
+            user=student
+        )
+        
+        return Response(
+            {
+                'message': 'Student added successfully',
+                'classroom_user_id': classroom_user.id
+            }, 
+            status=status.HTTP_201_CREATED
+        )
+    
+    @action(detail=True, methods=['post'], url_path='remove-student')
+    def remove_student(self, request, pk=None):
+        """Remove a single student from a classroom"""
+        classroom = self.get_object()
+        student_id = request.data.get('student_id')
+        
+        if not student_id:
+            return Response(
+                {'error': 'student_id is required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            # Find the ClassroomUser entry
+            classroom_user = ClassroomUser.objects.get(
+                classroom=classroom,
+                user_id=student_id
+            )
+            classroom_user.delete()
+            
+            return Response(
+                {'message': 'Student removed successfully'}, 
+                status=status.HTTP_200_OK
+            )
+        except ClassroomUser.DoesNotExist:
+            return Response(
+                {'error': 'Student is not in this classroom'}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
 
 
 class ClassroomUserViewSet(viewsets.ModelViewSet):

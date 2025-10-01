@@ -72,7 +72,7 @@ class TestSerializer(serializers.ModelSerializer):
     def get_is_available(self, obj):
         if not obj.is_published:
             return False
-        if obj.scheduled_at and obj.scheduled_at > timezone.now():
+        if obj.scheduled_at and self.get_is_deadline_passed(obj):
             return False
         return True
     
@@ -103,7 +103,14 @@ class TestSerializer(serializers.ModelSerializer):
     
     def get_is_deadline_passed(self, obj):
         if obj.scheduled_at:
-            return timezone.now() > obj.scheduled_at
+            # Calculate the deadline: scheduled_at + time_limit_minutes
+            if obj.time_limit_minutes:
+                from datetime import timedelta
+                deadline = obj.scheduled_at + timedelta(minutes=obj.time_limit_minutes)
+                return timezone.now() > deadline
+            else:
+                # If no time limit, just check if current time is past scheduled time
+                return timezone.now() > obj.scheduled_at
         return False
     
     def get_has_attempted(self, obj):

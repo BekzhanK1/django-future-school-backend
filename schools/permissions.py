@@ -17,6 +17,7 @@ class IsSchoolAdminOrSuperAdmin(permissions.BasePermission):
 
 class IsTeacherOrAbove(permissions.BasePermission):
     def has_permission(self, request, view):
+        print(request.user)
         return (
             request.user.is_authenticated and 
             request.user.role in [UserRole.SUPERADMIN, UserRole.SCHOOLADMIN, UserRole.TEACHER]

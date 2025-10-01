@@ -1,6 +1,7 @@
 from rest_framework import serializers
+from django.db.models import Count, Q
 from .models import School, Classroom, ClassroomUser
-from users.models import User
+from users.models import User, UserRole
 
 
 class SchoolSerializer(serializers.ModelSerializer):
@@ -11,10 +12,39 @@ class SchoolSerializer(serializers.ModelSerializer):
 
 class ClassroomSerializer(serializers.ModelSerializer):
     school_name = serializers.CharField(source='school.name', read_only=True)
+    total_students = serializers.SerializerMethodField()
     
     class Meta:
         model = Classroom
-        fields = ['id', 'grade', 'letter', 'language', 'kundelik_id', 'school', 'school_name']
+        fields = ['id', 'grade', 'letter', 'language', 'kundelik_id', 'school', 'school_name', 'total_students']
+    
+    def get_total_students(self, obj):
+        # Count only students (not teachers or other roles)
+        return obj.classroom_users.filter(user__role=UserRole.STUDENT).count()
+
+
+class ClassroomDetailSerializer(serializers.ModelSerializer):
+    school_name = serializers.CharField(source='school.name', read_only=True)
+    students = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Classroom
+        fields = ['id', 'grade', 'letter', 'language', 'kundelik_id', 'school', 'school_name', 'students']
+    
+    def get_students(self, obj):
+        # Get all students in this classroom
+        classroom_users = obj.classroom_users.filter(user__role=UserRole.STUDENT).select_related('user')
+        students = []
+        for cu in classroom_users:
+            students.append({
+                'id': cu.user.id,
+                'username': cu.user.username,
+                'email': cu.user.email,
+                'first_name': cu.user.first_name,
+                'last_name': cu.user.last_name,
+                'role': cu.user.role,
+            })
+        return students
 
 
 class ClassroomUserSerializer(serializers.ModelSerializer):

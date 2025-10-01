@@ -11,7 +11,7 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
     command: >
-      sh -c "python manage.py migrate && 
+      sh -c "python manage.py makemigrations && python manage.py migrate && 
              python manage.py runserver 0.0.0.0:8000"
 
   redis:

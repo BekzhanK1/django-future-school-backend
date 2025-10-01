@@ -3,7 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
-
+from rest_framework.permissions import AllowAny
 from .models import Course, SubjectGroup, CourseSection
 from .serializers import (
     CourseSerializer, SubjectGroupSerializer, CourseSectionSerializer,
@@ -34,7 +34,7 @@ class CourseViewSet(viewsets.ModelViewSet):
 class SubjectGroupViewSet(viewsets.ModelViewSet):
     queryset = SubjectGroup.objects.select_related('course', 'classroom', 'teacher').all()
     serializer_class = SubjectGroupSerializer
-    permission_classes = [IsSuperAdmin]
+    permission_classes = [AllowAny]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['course', 'classroom', 'teacher']
     search_fields = ['course__name', 'course__course_code', 'classroom__letter', 'teacher__username']
@@ -129,7 +129,7 @@ class CourseSectionViewSet(viewsets.ModelViewSet):
         'tests__teacher'
     ).all()
     serializer_class = CourseSectionSerializer
-    permission_classes = [IsTeacherOrAbove]
+    permission_classes = [AllowAny]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['subject_group']
     search_fields = ['title']

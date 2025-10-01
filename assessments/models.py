@@ -14,7 +14,7 @@ class Test(models.Model):
     teacher = models.ForeignKey("users.User", on_delete=models.CASCADE, related_name="tests")
     title = models.CharField(max_length=255)
     description = models.TextField(null=True, blank=True)
-    is_published = models.BooleanField(default=False)
+    is_published = models.BooleanField(default=True)
     scheduled_at = models.DateTimeField(null=True, blank=True)
     reveal_results_at = models.DateTimeField(null=True, blank=True)
     

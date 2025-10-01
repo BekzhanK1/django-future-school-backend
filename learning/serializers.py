@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import Resource, Assignment, AssignmentAttachment, Submission, SubmissionAttachment, Grade, Attendance, AttendanceRecord, Event
+from users.models import UserRole
 
 
 class ResourceSerializer(serializers.ModelSerializer):
@@ -54,13 +55,14 @@ class AssignmentSerializer(serializers.ModelSerializer):
     is_available = serializers.SerializerMethodField()
     is_deadline_passed = serializers.SerializerMethodField()
     is_submitted = serializers.SerializerMethodField()
+    student_submission = serializers.SerializerMethodField()
     
     class Meta:
         model = Assignment
         fields = ['id', 'course_section', 'teacher', 'title', 'description', 'due_at', 'max_grade', 'file',
                  'course_section_title', 'subject_group_course_name', 'subject_group_course_code', 
                  'teacher_username', 'submission_count', 'attachments',
-                 'is_available', 'is_deadline_passed', 'is_submitted']
+                 'is_available', 'is_deadline_passed', 'is_submitted', 'student_submission']
     
     def get_submission_count(self, obj):
         return obj.submissions.count()
@@ -87,6 +89,24 @@ class AssignmentSerializer(serializers.ModelSerializer):
             return obj.submissions.filter(student=user).exists()
         except Exception:
             return False
+    
+    def get_student_submission(self, obj):
+        request = self.context.get('request')
+        if not request or not getattr(request, 'user', None):
+            return None
+        user = request.user
+        
+        # Only return submission for students
+        if user.role != UserRole.STUDENT:
+            return None
+        
+        try:
+            submission = obj.submissions.filter(student=user).first()
+            if submission:
+                return SubmissionSerializer(submission, context=self.context).data
+            return None
+        except Exception:
+            return None
 
 
 class SubmissionAttachmentSerializer(serializers.ModelSerializer):

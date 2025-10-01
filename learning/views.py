@@ -1,10 +1,10 @@
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.db.models import Q
-
+from rest_framework.permissions import AllowAny
 from .models import Resource, Assignment, AssignmentAttachment, Submission, SubmissionAttachment, Grade, Attendance, AttendanceRecord, AttendanceStatus
 from .serializers import (
     ResourceSerializer, ResourceTreeSerializer, AssignmentSerializer, AssignmentAttachmentSerializer,
@@ -32,6 +32,22 @@ class ResourceViewSet(viewsets.ModelViewSet):
     search_fields = ['title', 'description']
     ordering_fields = ['position', 'title']
     ordering = ['position', 'id']
+    
+    def create(self, request, *args, **kwargs):
+        """Override create method to add debugging for 400 errors"""
+        print(f"Resource creation request data: {request.data}")
+        print(f"Request user: {request.user}")
+        print(f"User role: {request.user.role}")
+        
+        serializer = self.get_serializer(data=request.data)
+        if serializer.is_valid():
+            print("Serializer is valid, creating resource...")
+            self.perform_create(serializer)
+            headers = self.get_success_headers(serializer.data)
+            return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+        else:
+            print(f"Serializer errors: {serializer.errors}")
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -153,6 +169,20 @@ class AssignmentViewSet(viewsets.ModelViewSet):
         # Superadmins can see all assignments (default queryset)
         
         return queryset
+    
+    def get_permissions(self):
+        """
+        Override permissions to allow students to read assignments from their courses
+        but restrict create/update/delete operations
+        """
+        if self.action in ['list', 'retrieve']:
+            # Allow all authenticated users to read assignments
+            permission_classes = [permissions.IsAuthenticated]
+        else:
+            # Use role-based permissions for create/update/delete
+            permission_classes = [RoleBasedPermission]
+        
+        return [permission() for permission in permission_classes]
 
 
 class AssignmentAttachmentViewSet(viewsets.ModelViewSet):
@@ -379,7 +409,7 @@ class GradeViewSet(viewsets.ModelViewSet):
 
 class AttendanceViewSet(viewsets.ModelViewSet):
     queryset = Attendance.objects.select_related('subject_group', 'taken_by').prefetch_related('records__student').all()
-    permission_classes = [RoleBasedPermission]
+    permission_classes = [AllowAny]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['subject_group', 'taken_by', 'taken_at']
     search_fields = ['subject_group__course__name', 'notes']

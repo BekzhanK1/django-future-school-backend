@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
+    "rest_framework_simplejwt",
     "drf_spectacular",
     "django_filters",
     "users",
@@ -64,6 +65,8 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    "future_school.middlewares.RemoveXFrameForMedia",
+    "csp.middleware.CSPMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -101,6 +104,17 @@ DATABASES = {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": BASE_DIR / "data" / "db.sqlite3",
     }
+}
+from csp.constants import SELF
+INSTALLED_APPS += ["csp"]
+
+# Disable X-Frame-Options for development
+X_FRAME_OPTIONS = 'ALLOWALL'
+
+CONTENT_SECURITY_POLICY = {
+    "DIRECTIVES": {
+        "frame-ancestors": [SELF, "localhost:3000", "localhost:8000", "http://localhost:3000", "http://localhost:8000"],
+    },
 }
 
 
