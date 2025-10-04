@@ -114,6 +114,10 @@ X_FRAME_OPTIONS = 'ALLOWALL'
 CONTENT_SECURITY_POLICY = {
     "DIRECTIVES": {
         "frame-ancestors": [SELF, "localhost:3000", "localhost:8000", "http://localhost:3000", "http://localhost:8000"],
+        "script-src": [SELF, "'unsafe-inline'", "https://cdn.jsdelivr.net"],
+        "style-src": [SELF, "'unsafe-inline'", "https://cdn.jsdelivr.net"],
+        "img-src": [SELF, "data:", "https://cdn.jsdelivr.net"],
+        "font-src": [SELF, "https://cdn.jsdelivr.net"],
     },
 }
 

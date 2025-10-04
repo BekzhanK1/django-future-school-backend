@@ -26,10 +26,10 @@ class Classroom(models.Model):
         constraints = [
             models.CheckConstraint(check=models.Q(grade__gte=0) & models.Q(grade__lte=12), name="check_grade_range"),
             models.UniqueConstraint(fields=["school", "grade", "letter"], name="uq_classroom_per_school"),
-        ]
+        ] 
 
     def __str__(self) -> str:
-        return f"{self.grade}{self.letter} - {self.school.name}"
+        return f"{self.grade}{self.letter}"
 
 
 class ClassroomUser(models.Model):
@@ -41,6 +41,3 @@ class ClassroomUser(models.Model):
             models.UniqueConstraint(fields=["classroom", "user"], name="_class_user_uc"),
         ]
 
-from django.db import models
-
-# Create your models here.

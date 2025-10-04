@@ -49,6 +49,7 @@ class AssignmentSerializer(serializers.ModelSerializer):
     course_section_title = serializers.CharField(source='course_section.title', read_only=True)
     subject_group_course_name = serializers.CharField(source='course_section.subject_group.course.name', read_only=True)
     subject_group_course_code = serializers.CharField(source='course_section.subject_group.course.course_code', read_only=True)
+    classroom = serializers.SerializerMethodField()
     teacher_username = serializers.CharField(source='teacher.username', read_only=True)
     submission_count = serializers.SerializerMethodField()
     attachments = AssignmentAttachmentSerializer(many=True, read_only=True)
@@ -56,14 +57,19 @@ class AssignmentSerializer(serializers.ModelSerializer):
     is_deadline_passed = serializers.SerializerMethodField()
     is_submitted = serializers.SerializerMethodField()
     student_submission = serializers.SerializerMethodField()
+    all_submissions = serializers.SerializerMethodField()
     
     class Meta:
         model = Assignment
         fields = ['id', 'course_section', 'teacher', 'title', 'description', 'due_at', 'max_grade', 'file',
                  'course_section_title', 'subject_group_course_name', 'subject_group_course_code', 
-                 'teacher_username', 'submission_count', 'attachments',
-                 'is_available', 'is_deadline_passed', 'is_submitted', 'student_submission']
+                 'teacher_username', 'submission_count', 'attachments', 'classroom',
+                 'is_available', 'is_deadline_passed', 'is_submitted', 'student_submission', 'all_submissions']
     
+
+    def get_classroom(self, obj):
+        return obj.course_section.subject_group.classroom.__str__()
+
     def get_submission_count(self, obj):
         return obj.submissions.count()
 
@@ -105,6 +111,23 @@ class AssignmentSerializer(serializers.ModelSerializer):
             if submission:
                 return SubmissionSerializer(submission, context=self.context).data
             return None
+        except Exception:
+            return None
+    
+    def get_all_submissions(self, obj):
+        """Return all submissions for teachers, None for students"""
+        request = self.context.get('request')
+        if not request or not getattr(request, 'user', None):
+            return None
+        user = request.user
+        
+        # Only return all submissions for teachers
+        if user.role != UserRole.TEACHER:
+            return None
+        
+        try:
+            submissions = obj.submissions.all().order_by('-submitted_at')
+            return SubmissionSerializer(submissions, many=True, context=self.context).data
         except Exception:
             return None
 

@@ -2,6 +2,7 @@ from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
+from django_filters import FilterSet, NumberFilter
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.db.models import Q
 from rest_framework.permissions import AllowAny
@@ -21,6 +22,15 @@ from .serializers import EventSerializer
 from datetime import date, timedelta, datetime
 from django.utils import timezone
 from .models import EventType
+
+
+class AssignmentFilterSet(FilterSet):
+    """Custom filterset for Assignment to allow filtering by subject_group"""
+    subject_group = NumberFilter(field_name='course_section__subject_group', lookup_expr='exact')
+    
+    class Meta:
+        model = Assignment
+        fields = ['course_section', 'teacher', 'subject_group']
 
 
 class ResourceViewSet(viewsets.ModelViewSet):
@@ -147,7 +157,7 @@ class AssignmentViewSet(viewsets.ModelViewSet):
     serializer_class = AssignmentSerializer
     permission_classes = [RoleBasedPermission]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['course_section', 'teacher']
+    filterset_class = AssignmentFilterSet
     search_fields = ['title', 'description']
     ordering_fields = ['due_at', 'title']
     ordering = ['due_at']

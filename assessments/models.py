@@ -49,6 +49,7 @@ class Question(models.Model):
     # For open questions
     correct_answer_text = models.TextField(null=True, blank=True, help_text="Expected answer for open questions")
     sample_answer = models.TextField(null=True, blank=True, help_text="Sample answer for reference")
+    key_words = models.TextField(null=True, blank=True, help_text="Comma-separated keywords for automatic grading of open questions")
     
     # For matching questions
     matching_pairs_json = models.JSONField(null=True, blank=True, help_text="JSON array of matching pairs")
@@ -173,8 +174,20 @@ class Answer(models.Model):
             return 0
             
         elif self.question.type == QuestionType.OPEN_QUESTION:
-            # This would need manual grading or AI-based grading
-            return None  # Requires manual review
+            # Check if key_words are provided for automatic grading
+            if self.question.key_words and self.text_answer:
+                # Split keywords by comma and strip whitespace
+                keywords = [kw.strip().lower() for kw in self.question.key_words.split(',') if kw.strip()]
+                answer_text = self.text_answer.lower()
+                
+                # Check if at least one keyword is present in the answer
+                if any(keyword in answer_text for keyword in keywords):
+                    return self.question.points
+                else:
+                    return 0
+            
+            # If no key_words provided, requires manual grading
+            return None
             
         elif self.question.type == QuestionType.MATCHING:
             if not self.matching_answers_json:

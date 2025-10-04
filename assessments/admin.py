@@ -53,7 +53,7 @@ class QuestionAdmin(admin.ModelAdmin):
     
     fieldsets = (
         (None, {'fields': ('test', 'type', 'text', 'points', 'position')}),
-        ('Open Question Settings', {'fields': ('correct_answer_text', 'sample_answer')}),
+        ('Open Question Settings', {'fields': ('correct_answer_text', 'sample_answer', 'key_words')}),
         ('Matching Question Settings', {'fields': ('matching_pairs_json',)}),
     )
     

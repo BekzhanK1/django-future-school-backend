@@ -19,7 +19,7 @@ class QuestionSerializer(serializers.ModelSerializer):
         model = Question
         fields = [
             'id', 'test', 'type', 'text', 'points', 'position',
-            'correct_answer_text', 'sample_answer', 'matching_pairs_json',
+            'correct_answer_text', 'sample_answer', 'key_words', 'matching_pairs_json',
             'options', 'options_count'
         ]
         read_only_fields = ['id']
@@ -188,11 +188,19 @@ class AnswerSerializer(serializers.ModelSerializer):
     max_score = serializers.ReadOnlyField()
     is_correct = serializers.ReadOnlyField()
     
+    # Student information
+    student_id = serializers.IntegerField(source='attempt.student.id', read_only=True)
+    student_username = serializers.CharField(source='attempt.student.username', read_only=True)
+    student_email = serializers.CharField(source='attempt.student.email', read_only=True)
+    student_first_name = serializers.CharField(source='attempt.student.first_name', read_only=True)
+    student_last_name = serializers.CharField(source='attempt.student.last_name', read_only=True)
+    
     class Meta:
         model = Answer
         fields = [
             'id', 'attempt', 'question', 'selected_options', 'text_answer', 'matching_answers_json',
             'score', 'max_score', 'is_correct', 'teacher_feedback', 'auto_feedback',
+            'student_id', 'student_username', 'student_email', 'student_first_name', 'student_last_name',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
@@ -305,7 +313,7 @@ class CreateQuestionSerializer(serializers.ModelSerializer):
         model = Question
         fields = [
             'test', 'type', 'text', 'points', 'position',
-            'correct_answer_text', 'sample_answer', 'matching_pairs_json', 'options'
+            'correct_answer_text', 'sample_answer', 'key_words', 'matching_pairs_json', 'options'
         ]
     
     def create(self, validated_data):
@@ -328,7 +336,7 @@ class NestedQuestionCreateSerializer(serializers.ModelSerializer):
         model = Question
         fields = [
             'type', 'text', 'points', 'position',
-            'correct_answer_text', 'sample_answer', 'matching_pairs_json', 'options'
+            'correct_answer_text', 'sample_answer', 'key_words', 'matching_pairs_json', 'options'
         ]
 
 
