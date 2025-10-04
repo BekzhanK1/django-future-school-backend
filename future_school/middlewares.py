@@ -22,3 +22,4 @@ class RemoveXFrameForMedia:
             response.pop('X-Frame-Options', None)
             
         return response
+

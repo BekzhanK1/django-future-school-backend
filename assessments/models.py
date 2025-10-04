@@ -19,7 +19,8 @@ class Test(models.Model):
     reveal_results_at = models.DateTimeField(null=True, blank=True)
     
     # Time management
-    time_limit_minutes = models.PositiveIntegerField(null=True, blank=True, help_text="Time limit in minutes (optional)")
+    start_date = models.DateTimeField(null=True, blank=True, help_text="Test start date and time")
+    end_date = models.DateTimeField(null=True, blank=True, help_text="Test end date and time")
     allow_multiple_attempts = models.BooleanField(default=False)
     max_attempts = models.PositiveIntegerField(null=True, blank=True, help_text="Maximum number of attempts (if multiple attempts allowed)")
     

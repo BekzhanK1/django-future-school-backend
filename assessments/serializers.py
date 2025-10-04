@@ -55,7 +55,7 @@ class TestSerializer(serializers.ModelSerializer):
         model = Test
         fields = [
             'id', 'course_section', 'teacher', 'title', 'description', 'is_published',
-            'scheduled_at', 'reveal_results_at', 'time_limit_minutes', 'allow_multiple_attempts',
+            'scheduled_at', 'reveal_results_at', 'start_date', 'end_date', 'allow_multiple_attempts',
             'max_attempts', 'show_correct_answers', 'show_feedback', 'show_score_immediately',
             'course_section_title', 'course_name', 'course_code', 'subject_group',
             'classroom_name', 'classroom_grade', 'classroom_letter', 'teacher_username',
@@ -72,7 +72,9 @@ class TestSerializer(serializers.ModelSerializer):
     def get_is_available(self, obj):
         if not obj.is_published:
             return False
-        if obj.scheduled_at and self.get_is_deadline_passed(obj):
+        if obj.start_date and timezone.now() < obj.start_date:
+            return False
+        if obj.end_date and timezone.now() > obj.end_date:
             return False
         return True
     
@@ -102,15 +104,8 @@ class TestSerializer(serializers.ModelSerializer):
         return True
     
     def get_is_deadline_passed(self, obj):
-        if obj.scheduled_at:
-            # Calculate the deadline: scheduled_at + time_limit_minutes
-            if obj.time_limit_minutes:
-                from datetime import timedelta
-                deadline = obj.scheduled_at + timedelta(minutes=obj.time_limit_minutes)
-                return timezone.now() > deadline
-            else:
-                # If no time limit, just check if current time is past scheduled time
-                return timezone.now() > obj.scheduled_at
+        if obj.end_date:
+            return timezone.now() > obj.end_date
         return False
     
     def get_has_attempted(self, obj):
@@ -358,7 +353,7 @@ class CreateTestSerializer(serializers.ModelSerializer):
         model = Test
         fields = [
             'course_section', 'subject_group', 'title', 'description', 'is_published',
-            'scheduled_at', 'reveal_results_at', 'time_limit_minutes',
+            'scheduled_at', 'reveal_results_at', 'start_date', 'end_date',
             'allow_multiple_attempts', 'max_attempts', 'show_correct_answers',
             'show_feedback', 'show_score_immediately', 'questions'
         ]

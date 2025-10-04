@@ -20,17 +20,17 @@ class QuestionInline(admin.TabularInline):
 
 @admin.register(Test)
 class TestAdmin(admin.ModelAdmin):
-    list_display = ('title', 'course_section', 'teacher', 'is_published', 'total_points', 'time_limit_minutes', 'scheduled_at')
-    list_filter = ('is_published', 'course_section__subject_group__course', 'teacher__role', 'scheduled_at', 'allow_multiple_attempts')
+    list_display = ('title', 'course_section', 'teacher', 'is_published', 'total_points', 'start_date', 'end_date', 'scheduled_at')
+    list_filter = ('is_published', 'course_section__subject_group__course', 'teacher__role', 'scheduled_at', 'start_date', 'end_date', 'allow_multiple_attempts')
     search_fields = ('title', 'description', 'course_section__title', 'teacher__username')
     autocomplete_fields = ('course_section', 'teacher')
-    date_hierarchy = 'scheduled_at'
+    date_hierarchy = 'start_date'
     inlines = [QuestionInline]
     
     fieldsets = (
         (None, {'fields': ('title', 'course_section', 'teacher', 'description')}),
         ('Publishing', {'fields': ('is_published', 'scheduled_at', 'reveal_results_at')}),
-        ('Time Management', {'fields': ('time_limit_minutes', 'allow_multiple_attempts', 'max_attempts')}),
+        ('Time Management', {'fields': ('start_date', 'end_date', 'allow_multiple_attempts', 'max_attempts')}),
         ('Result Visibility', {'fields': ('show_correct_answers', 'show_feedback', 'show_score_immediately')}),
     )
     
