@@ -43,8 +43,20 @@ class CourseSectionSerializer(serializers.ModelSerializer):
     
     def get_resources(self, obj):
         from learning.serializers import ResourceTreeSerializer
+        from users.models import UserRole
+        
         # Get root resources (no parent) for this section
         root_resources = obj.resources.filter(parent_resource__isnull=True).order_by('position', 'id')
+        
+        # Apply permission filtering if user is in context
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            user = request.user
+            if user.role == UserRole.STUDENT:
+                # Filter resources based on student's classroom enrollment
+                student_classrooms = user.classroom_users.values_list('classroom', flat=True)
+                root_resources = root_resources.filter(course_section__subject_group__classroom__in=student_classrooms)
+        
         return ResourceTreeSerializer(root_resources, many=True, context=self.context).data
     
     def get_assignments(self, obj):

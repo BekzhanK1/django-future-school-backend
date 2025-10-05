@@ -28,6 +28,16 @@ class ResourceTreeSerializer(serializers.ModelSerializer):
     
     def get_children(self, obj):
         children = obj.children.all().order_by('position', 'id')
+        
+        # Apply permission filtering if user is in context
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            user = request.user
+            if user.role == UserRole.STUDENT:
+                # Filter children based on student's classroom enrollment
+                student_classrooms = user.classroom_users.values_list('classroom', flat=True)
+                children = children.filter(course_section__subject_group__classroom__in=student_classrooms)
+        
         return ResourceTreeSerializer(children, many=True, context=self.context).data
     
     def get_level(self, obj):
@@ -145,6 +155,7 @@ class SubmissionSerializer(serializers.ModelSerializer):
     student_last_name = serializers.CharField(source='student.last_name', read_only=True)
     assignment_title = serializers.CharField(source='assignment.title', read_only=True)
     assignment_max_grade = serializers.IntegerField(source='assignment.max_grade', read_only=True)
+    grade_id = serializers.SerializerMethodField()
     grade_value = serializers.SerializerMethodField()
     grade_feedback = serializers.SerializerMethodField()
     graded_at = serializers.SerializerMethodField()
@@ -155,7 +166,13 @@ class SubmissionSerializer(serializers.ModelSerializer):
         model = Submission
         fields = ['id', 'assignment', 'student', 'submitted_at', 'text', 'file',
                  'student_username', 'student_email', 'student_first_name', 'student_last_name', 
-                 'assignment_title', 'assignment_max_grade', 'grade_value', 'grade_feedback', 'graded_at', 'attachments']
+                 'assignment_title', 'assignment_max_grade', 'grade_id', 'grade_value', 'grade_feedback', 'graded_at', 'attachments']
+    
+    def get_grade_id(self, obj):
+        try:
+            return obj.grade.id
+        except Grade.DoesNotExist:
+            return None
     
     def get_grade_value(self, obj):
         try:

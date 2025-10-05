@@ -39,6 +39,23 @@ class Resource(models.Model):
             max_pos = siblings.aggregate(models.Max('position'))['position__max'] or 0
             self.position = max_pos + 1
         super().save(*args, **kwargs)
+    
+    def delete_with_children(self):
+        """
+        Custom method to delete this resource and all its children recursively.
+        This provides explicit control over the deletion process.
+        """
+        if self.type == 'directory':
+            # Delete all children first (this will trigger CASCADE automatically)
+            children = self.children.all()
+            for child in children:
+                if child.type == 'directory':
+                    child.delete_with_children()  # Recursive call for subdirectories
+                else:
+                    child.delete()  # This will trigger the signals
+        
+        # Delete this resource (will trigger signals for file cleanup)
+        self.delete()
 
 
 class Assignment(models.Model):

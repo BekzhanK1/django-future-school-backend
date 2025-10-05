@@ -6,6 +6,10 @@ from django_filters import FilterSet, NumberFilter
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.db.models import Q
 from rest_framework.permissions import AllowAny
+from django.http import HttpResponse
+import zipfile
+import io
+import os
 from .models import Resource, Assignment, AssignmentAttachment, Submission, SubmissionAttachment, Grade, Attendance, AttendanceRecord, AttendanceStatus
 from .serializers import (
     ResourceSerializer, ResourceTreeSerializer, AssignmentSerializer, AssignmentAttachmentSerializer,
@@ -65,8 +69,10 @@ class ResourceViewSet(viewsets.ModelViewSet):
         
         # Students can only see resources for their courses
         if user.role == UserRole.STUDENT:
-            student_courses = user.classroom_users.values_list('classroom__subject_groups__course', flat=True)
-            queryset = queryset.filter(course_section__subject_group__course__in=student_courses)
+            # Get student's classrooms
+            student_classrooms = user.classroom_users.values_list('classroom', flat=True)
+            # Filter resources that belong to course sections in the student's classrooms
+            queryset = queryset.filter(course_section__subject_group__classroom__in=student_classrooms)
         # Teachers can see resources for their subject groups
         elif user.role == UserRole.TEACHER:
             queryset = queryset.filter(course_section__subject_group__teacher=user)
@@ -150,6 +156,225 @@ class ResourceViewSet(viewsets.ModelViewSet):
         
         serializer = ResourceSerializer(resource, context={'request': request})
         return Response(serializer.data)
+
+    @action(detail=False, methods=['post'], url_path='create-directory-with-files')
+    def create_directory_with_files(self, request):
+        """
+        Create a directory resource with multiple files as children.
+        Expected payload:
+        - course_section: int
+        - title: str
+        - files: list of files (multipart/form-data)
+        """
+        try:
+            course_section_id = request.data.get('course_section')
+            title = request.data.get('title')
+            files = request.FILES.getlist('files')
+            
+            if not course_section_id or not title:
+                return Response(
+                    {'error': 'course_section and title are required'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Create the directory resource first
+            directory_data = {
+                'course_section': course_section_id,
+                'type': 'directory',
+                'title': title,
+            }
+            
+            directory_serializer = self.get_serializer(data=directory_data)
+            if not directory_serializer.is_valid():
+                return Response(directory_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            
+            directory = directory_serializer.save()
+            directory_id = directory.id
+            
+            created_files = []
+            
+            # Create child file resources
+            for file in files:
+                file_data = {
+                    'course_section': course_section_id,
+                    'type': 'file',
+                    'title': file.name,
+                    'file': file,
+                    'parent_resource': directory_id,
+                }
+                
+                file_serializer = self.get_serializer(data=file_data)
+                if file_serializer.is_valid():
+                    file_resource = file_serializer.save()
+                    created_files.append({
+                        'id': file_resource.id,
+                        'title': file_resource.title,
+                        'file': file_resource.file.url if file_resource.file else None,
+                    })
+                else:
+                    # If file creation fails, log error but continue
+                    print(f"Error creating file {file.name}: {file_serializer.errors}")
+            
+            # Return directory with created files
+            directory_response = self.get_serializer(directory).data
+            directory_response['created_files'] = created_files
+            directory_response['files_count'] = len(created_files)
+            
+            return Response(directory_response, status=status.HTTP_201_CREATED)
+            
+        except Exception as e:
+            print(f"Error creating directory with files: {str(e)}")
+            return Response(
+                {'error': 'Failed to create directory with files'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=['post'], url_path='add-files-to-directory')
+    def add_files_to_directory(self, request):
+        """
+        Add multiple files to an existing directory.
+        Expected payload:
+        - directory_id: int (ID of existing directory)
+        - course_section: int
+        - files: list of files (multipart/form-data)
+        """
+        try:
+            directory_id = request.data.get('directory_id')
+            course_section_id = request.data.get('course_section')
+            files = request.FILES.getlist('files')
+            
+            if not directory_id or not course_section_id:
+                return Response(
+                    {'error': 'directory_id and course_section are required'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Verify the directory exists and user has permission
+            try:
+                directory = Resource.objects.get(id=directory_id, type='directory')
+            except Resource.DoesNotExist:
+                return Response(
+                    {'error': 'Directory not found'}, 
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            created_files = []
+            
+            # Create child file resources
+            for file in files:
+                file_data = {
+                    'course_section': course_section_id,
+                    'type': 'file',
+                    'title': file.name,
+                    'file': file,
+                    'parent_resource': directory_id,
+                }
+                
+                file_serializer = self.get_serializer(data=file_data)
+                if file_serializer.is_valid():
+                    file_resource = file_serializer.save()
+                    created_files.append({
+                        'id': file_resource.id,
+                        'title': file_resource.title,
+                        'file': file_resource.file.url if file_resource.file else None,
+                    })
+                else:
+                    # If file creation fails, log error but continue
+                    print(f"Error creating file {file.name}: {file_serializer.errors}")
+            
+            # Return success response with created files info
+            response_data = {
+                'directory_id': directory_id,
+                'directory_title': directory.title,
+                'created_files': created_files,
+                'files_count': len(created_files),
+                'message': f'Successfully added {len(created_files)} file(s) to directory'
+            }
+            
+            return Response(response_data, status=status.HTTP_201_CREATED)
+            
+        except Exception as e:
+            print(f"Error adding files to directory: {str(e)}")
+            return Response(
+                {'error': 'Failed to add files to directory'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=True, methods=['get'], url_path='download-zip')
+    def download_directory_zip(self, request, pk=None):
+        """
+        Download all files in a directory as a ZIP file.
+        """
+        
+        try:
+            # Get the directory resource
+            directory = self.get_object()
+            if directory.type != 'directory':
+                return Response(
+                    {'error': 'Resource is not a directory'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Get all files in the directory (including nested files)
+            def get_all_files(resource, file_list=None, base_path=''):
+                if file_list is None:
+                    file_list = []
+                
+                if resource.type == 'file' and resource.file:
+                    file_list.append({
+                        'path': os.path.join(base_path, resource.title),
+                        'file': resource.file
+                    })
+                elif resource.type == 'directory':
+                    for child in resource.children.all():
+                        get_all_files(child, file_list, os.path.join(base_path, resource.title))
+                
+                return file_list
+            
+            all_files = get_all_files(directory)
+            
+            if not all_files:
+                return Response(
+                    {'error': 'Directory is empty'}, 
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Create ZIP file in memory
+            zip_buffer = io.BytesIO()
+            
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                for file_info in all_files:
+                    try:
+                        # Read file content
+                        file_path = file_info['file'].path
+                        if os.path.exists(file_path):
+                            with open(file_path, 'rb') as f:
+                                zip_file.writestr(file_info['path'], f.read())
+                        else:
+                            # File doesn't exist on disk, skip it
+                            continue
+                    except Exception as e:
+                        print(f"Error adding file {file_info['path']} to ZIP: {str(e)}")
+                        continue
+            
+            zip_buffer.seek(0)
+            
+            # Create HTTP response
+            response = HttpResponse(
+                zip_buffer.getvalue(),
+                content_type='application/zip'
+            )
+            response['Content-Disposition'] = f'attachment; filename="{directory.title}.zip"'
+            response['Content-Length'] = len(zip_buffer.getvalue())
+            
+            return response
+            
+        except Exception as e:
+            print(f"Error creating ZIP file: {str(e)}")
+            return Response(
+                {'error': 'Failed to create ZIP file'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class AssignmentViewSet(viewsets.ModelViewSet):

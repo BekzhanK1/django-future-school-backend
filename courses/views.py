@@ -10,6 +10,7 @@ from .serializers import (
     AutoCreateWeekSectionsSerializer, CourseFullSerializer
 )
 from schools.permissions import IsSuperAdmin, IsSchoolAdminOrSuperAdmin, IsTeacherOrAbove
+from learning.role_permissions import RoleBasedPermission
 from users.models import UserRole
 
 
@@ -129,12 +130,30 @@ class CourseSectionViewSet(viewsets.ModelViewSet):
         'tests__teacher'
     ).all()
     serializer_class = CourseSectionSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [RoleBasedPermission]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['subject_group']
     search_fields = ['title']
     ordering_fields = ['position', 'title']
     ordering = ['position', 'id']
+    
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        user = self.request.user
+        
+        # Students can only see course sections from their enrolled classrooms
+        if user.role == UserRole.STUDENT:
+            student_classrooms = user.classroom_users.values_list('classroom', flat=True)
+            queryset = queryset.filter(subject_group__classroom__in=student_classrooms)
+        # Teachers can see course sections from their subject groups
+        elif user.role == UserRole.TEACHER:
+            queryset = queryset.filter(subject_group__teacher=user)
+        # School admins can see course sections from their school
+        elif user.role == UserRole.SCHOOLADMIN:
+            queryset = queryset.filter(subject_group__classroom__school=user.school)
+        # Superadmins can see all course sections (default queryset)
+        
+        return queryset
 
     @action(detail=False, methods=['patch'], url_path='change-items-order')
     def change_items_order(self, request):

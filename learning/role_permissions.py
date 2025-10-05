@@ -80,7 +80,6 @@ class RoleBasedPermission(permissions.BasePermission):
     
     def has_object_permission(self, request, view, obj):
         user = request.user
-        print(obj.teacher)
         # Superadmin can access everything
         if user.role == UserRole.SUPERADMIN:
             return True
@@ -105,14 +104,39 @@ class RoleBasedPermission(permissions.BasePermission):
                 return obj.assignment.teacher == user
             if hasattr(obj, 'test'):
                 return obj.test.teacher == user
+            if hasattr(obj, 'submission'):
+                # For Grade objects, check if the submission's assignment belongs to the teacher
+                return obj.submission.assignment.teacher == user
+            if hasattr(obj, 'graded_by'):
+                # For Grade objects, check if the teacher is the one who graded it OR if the assignment belongs to the teacher
+                if obj.graded_by == user:
+                    return True
+                if hasattr(obj, 'submission'):
+                    return obj.submission.assignment.teacher == user
             return False
         
-        # Student can access their own data
+        # Student can access their own data and resources from their enrolled courses
         if user.role == UserRole.STUDENT:
+            # Direct student assignment
             if hasattr(obj, 'student'):
                 return obj.student == user
             if hasattr(obj, 'user'):
                 return obj.user == user
+            
+            # Check if student is enrolled in the classroom/subject group
+            if hasattr(obj, 'subject_group'):
+                student_classrooms = user.classroom_users.values_list('classroom', flat=True)
+                return obj.subject_group.classroom.id in student_classrooms
+            
+            if hasattr(obj, 'course_section'):
+                student_classrooms = user.classroom_users.values_list('classroom', flat=True)
+                return obj.course_section.subject_group.classroom.id in student_classrooms
+            
+            # Check through classroom enrollment
+            if hasattr(obj, 'classroom'):
+                student_classrooms = user.classroom_users.values_list('classroom', flat=True)
+                return obj.classroom.id in student_classrooms
+            
             return False
         
         return False

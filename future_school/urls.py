@@ -29,6 +29,7 @@ urlpatterns = [
     path('api/', include('courses.urls')),
     path('api/', include('learning.urls')),
     path('api/', include('assessments.urls')),
+    path('api/', include('tests_urls')),  # Tests routes at /api/tests/
     # path('api/microsoft/', include('microsoft_graph.urls')),
 ]
 
