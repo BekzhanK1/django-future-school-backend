@@ -80,7 +80,6 @@ class RoleBasedPermission(permissions.BasePermission):
     
     def has_object_permission(self, request, view, obj):
         user = request.user
-        print(obj.teacher)
         # Superadmin can access everything
         if user.role == UserRole.SUPERADMIN:
             return True
