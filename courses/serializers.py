@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from datetime import datetime, timedelta
+from django.utils import timezone
 from .models import Course, SubjectGroup, CourseSection
 from microsoft_graph.serializers import ShortOnlineMeetingSerializer
 
@@ -36,10 +37,11 @@ class CourseSectionSerializer(serializers.ModelSerializer):
     resources = serializers.SerializerMethodField()
     assignments = serializers.SerializerMethodField()
     tests = serializers.SerializerMethodField()
+    is_current = serializers.SerializerMethodField()
     
     class Meta:
         model = CourseSection
-        fields = ['id', 'subject_group', 'title', 'position', 'start_date', 'end_date', 'resources', 'assignments', 'tests']
+        fields = ['id', 'subject_group', 'title', 'position',  'is_current' ,'is_general', 'start_date', 'end_date', 'resources', 'assignments', 'tests']
     
     def get_resources(self, obj):
         from learning.serializers import ResourceTreeSerializer
@@ -58,6 +60,15 @@ class CourseSectionSerializer(serializers.ModelSerializer):
                 root_resources = root_resources.filter(course_section__subject_group__classroom__in=student_classrooms)
         
         return ResourceTreeSerializer(root_resources, many=True, context=self.context).data
+
+    def get_is_current(self, obj):
+        # A section is current if today is within its date range and it's not general
+        if obj.is_general:
+            return False
+        if not obj.start_date or not obj.end_date:
+            return False
+        today = timezone.now().date()
+        return obj.start_date <= today <= obj.end_date
     
     def get_assignments(self, obj):
         from learning.serializers import AssignmentSerializer
