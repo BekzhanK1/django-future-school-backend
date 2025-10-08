@@ -19,7 +19,11 @@ class RemoveXFrameForMedia:
         
         # Remove X-Frame-Options header for media files
         if request.path.startswith('/media/'):
-            response.pop('X-Frame-Options', None)
+            # FileResponse does not implement pop; mutate headers dict instead
+            if 'X-Frame-Options' in response.headers:
+                del response.headers['X-Frame-Options']
             
         return response
+
+
 
