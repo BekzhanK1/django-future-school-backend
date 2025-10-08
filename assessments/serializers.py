@@ -59,7 +59,7 @@ class TestSerializer(serializers.ModelSerializer):
             'scheduled_at', 'reveal_results_at', 'start_date', 'end_date', 'allow_multiple_attempts',
             'max_attempts', 'show_correct_answers', 'show_feedback', 'show_score_immediately',
             'course_section_title', 'course_name', 'course_code', 'subject_group',
-            'classroom_name', 'classroom_grade', 'classroom_letter', 'teacher_username',
+            'classroom_name', 'classroom_grade', 'classroom_letter', 'teacher_username', 'teacher_fullname',
             'teacher_first_name', 'teacher_last_name', 'total_points', 'attempt_count',
             'is_available', 'can_see_results', 'can_attempt', 'is_deadline_passed', 'has_attempted',
             'my_active_attempt_id', 'last_submitted_attempt_id', 'my_latest_attempt_can_view_results',
