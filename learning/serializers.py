@@ -61,6 +61,7 @@ class AssignmentSerializer(serializers.ModelSerializer):
     subject_group_course_code = serializers.CharField(source='course_section.subject_group.course.course_code', read_only=True)
     classroom = serializers.SerializerMethodField()
     teacher_username = serializers.CharField(source='teacher.username', read_only=True)
+    teacher_fullname = serializers.CharField(source='teacher.get_full_name', read_only=True)
     submission_count = serializers.SerializerMethodField()
     attachments = AssignmentAttachmentSerializer(many=True, read_only=True)
     is_available = serializers.SerializerMethodField()
@@ -73,7 +74,7 @@ class AssignmentSerializer(serializers.ModelSerializer):
         model = Assignment
         fields = ['id', 'course_section', 'teacher', 'title', 'description', 'due_at', 'max_grade', 'file',
                  'course_section_title', 'subject_group_course_name', 'subject_group_course_code', 
-                 'teacher_username', 'submission_count', 'attachments', 'classroom',
+                 'teacher_username', 'teacher_fullname', 'submission_count', 'attachments', 'classroom',
                  'is_available', 'is_deadline_passed', 'is_submitted', 'student_submission', 'all_submissions']
     
 

@@ -17,6 +17,7 @@ class SubjectGroupSerializer(serializers.ModelSerializer):
     course_code = serializers.CharField(source='course.course_code', read_only=True)
     classroom_display = serializers.CharField(source='classroom.__str__', read_only=True)
     teacher_username = serializers.CharField(source='teacher.username', read_only=True)
+    teacher_fullname = serializers.CharField(source='teacher.get_full_name', read_only=True)
     teacher_email = serializers.CharField(source='teacher.email', read_only=True)
     external_id = serializers.CharField(read_only=True)
     online_meeting = serializers.SerializerMethodField()
@@ -30,7 +31,7 @@ class SubjectGroupSerializer(serializers.ModelSerializer):
     class Meta:
         model = SubjectGroup
         fields = ['id', 'course', 'classroom', 'teacher', 'course_name', 'course_code', 
-                 'classroom_display', 'teacher_username', 'teacher_email', 'external_id','online_meeting', ]
+                 'classroom_display', 'teacher_username', 'teacher_fullname', 'teacher_email', 'external_id','online_meeting', ]
 
 
 class CourseSectionSerializer(serializers.ModelSerializer):

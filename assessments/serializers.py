@@ -38,6 +38,7 @@ class TestSerializer(serializers.ModelSerializer):
     classroom_grade = serializers.IntegerField(source='course_section.subject_group.classroom.grade', read_only=True)
     classroom_letter = serializers.CharField(source='course_section.subject_group.classroom.letter', read_only=True)
     teacher_username = serializers.CharField(source='teacher.username', read_only=True)
+    teacher_fullname = serializers.CharField(source='teacher.get_full_name', read_only=True)
     teacher_first_name = serializers.CharField(source='teacher.first_name', read_only=True)
     teacher_last_name = serializers.CharField(source='teacher.last_name', read_only=True)
     total_points = serializers.ReadOnlyField()
