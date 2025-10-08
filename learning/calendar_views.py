@@ -66,29 +66,46 @@ def calendar_events(request):
     if user.role in ['superadmin', 'schooladmin', 'teacher']:
         # Teachers and admins see all tests
         tests = Test.objects.filter(
-            Q(scheduled_at__date__range=[start_date, end_date]) |
+            Q(start_date__date__range=[start_date, end_date]) |
+            Q(end_date__date__range=[start_date, end_date]) |
             Q(reveal_results_at__date__range=[start_date, end_date])
-        ).select_related('course', 'teacher')
+        ).select_related('course_section__subject_group__course', 'teacher')
     else:
         # Students see tests for their courses
         student_courses = user.classroom_users.values_list('classroom__subject_groups__course', flat=True)
         tests = Test.objects.filter(
-            Q(course__in=student_courses) &
-            (Q(scheduled_at__date__range=[start_date, end_date]) |
+            Q(course_section__subject_group__course__in=student_courses) &
+            (Q(start_date__date__range=[start_date, end_date]) |
+             Q(end_date__date__range=[start_date, end_date]) |
              Q(reveal_results_at__date__range=[start_date, end_date]))
-        ).select_related('course', 'teacher')
+        ).select_related('course_section__subject_group__course', 'teacher')
     
     for test in tests:
         # Test start event
-        if test.scheduled_at and start_date <= test.scheduled_at.date() <= end_date:
+        if test.start_date and start_date <= test.start_date.date() <= end_date:
             events.append({
                 'id': f'test_start_{test.id}',
                 'title': f'{test.title} (Starts)',
                 'type': 'test_start',
-                'start': test.scheduled_at.isoformat(),
-                'end': test.scheduled_at.isoformat(),
-                'course_name': test.course.name,
-                'course_code': test.course.course_code,
+                'start': test.start_date.isoformat(),
+                'end': test.start_date.isoformat(),
+                'course_name': test.course_section.subject_group.course.name,
+                'course_code': test.course_section.subject_group.course.course_code,
+                'teacher': test.teacher.username,
+                'description': test.description,
+                'url': f'/api/tests/{test.id}/',
+            })
+        
+        # Test end event
+        if test.end_date and start_date <= test.end_date.date() <= end_date:
+            events.append({
+                'id': f'test_end_{test.id}',
+                'title': f'{test.title} (Ends)',
+                'type': 'test_end',
+                'start': test.end_date.isoformat(),
+                'end': test.end_date.isoformat(),
+                'course_name': test.course_section.subject_group.course.name,
+                'course_code': test.course_section.subject_group.course.course_code,
                 'teacher': test.teacher.username,
                 'description': test.description,
                 'url': f'/api/tests/{test.id}/',
@@ -102,8 +119,8 @@ def calendar_events(request):
                 'type': 'test_results',
                 'start': test.reveal_results_at.isoformat(),
                 'end': test.reveal_results_at.isoformat(),
-                'course_name': test.course.name,
-                'course_code': test.course.course_code,
+                'course_name': test.course_section.subject_group.course.name,
+                'course_code': test.course_section.subject_group.course.course_code,
                 'teacher': test.teacher.username,
                 'description': 'Test results will be revealed',
                 'url': f'/api/tests/{test.id}/',
@@ -144,16 +161,18 @@ def upcoming_events(request):
     # Get tests in next 7 days
     if user.role in ['superadmin', 'schooladmin', 'teacher']:
         tests = Test.objects.filter(
-            Q(scheduled_at__date__range=[today, next_week]) |
+            Q(start_date__date__range=[today, next_week]) |
+            Q(end_date__date__range=[today, next_week]) |
             Q(reveal_results_at__date__range=[today, next_week])
-        ).select_related('course', 'teacher')
+        ).select_related('course_section__subject_group__course', 'teacher')
     else:
         student_courses = user.classroom_users.values_list('classroom__subject_groups__course', flat=True)
         tests = Test.objects.filter(
-            Q(course__in=student_courses) &
-            (Q(scheduled_at__date__range=[today, next_week]) |
+            Q(course_section__subject_group__course__in=student_courses) &
+            (Q(start_date__date__range=[today, next_week]) |
+             Q(end_date__date__range=[today, next_week]) |
              Q(reveal_results_at__date__range=[today, next_week]))
-        ).select_related('course', 'teacher')
+        ).select_related('course_section__subject_group__course', 'teacher')
 
     upcoming = []
     for assignment in assignments:
@@ -167,14 +186,14 @@ def upcoming_events(request):
         })
     
     for test in tests:
-        if test.scheduled_at and today <= test.scheduled_at.date() <= next_week:
+        if test.start_date and today <= test.start_date.date() <= next_week:
             upcoming.append({
                 'id': f'test_{test.id}',
                 'title': test.title,
                 'type': 'test',
-                'due_at': test.scheduled_at.isoformat(),
-                'course_name': test.course.name,
-                'days_until': (test.scheduled_at.date() - today).days,
+                'due_at': test.start_date.isoformat(),
+                'course_name': test.course_section.subject_group.course.name,
+                'days_until': (test.start_date.date() - today).days,
             })
     
     # Sort by due date

@@ -78,7 +78,7 @@ class CourseSectionSerializer(serializers.ModelSerializer):
 
     def get_tests(self, obj):
         from assessments.serializers import TestSerializer
-        tests = obj.tests.all().order_by('scheduled_at', 'id')
+        tests = obj.tests.all().order_by('start_date', 'id')
         return TestSerializer(tests, many=True, context=self.context).data
 
 
