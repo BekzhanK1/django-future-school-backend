@@ -47,6 +47,7 @@ jobs:
           REPO: ${{ github.repository }}
           REF: ${{ github.ref_name }}
           SHA: ${{ github.sha }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           START_TS: ${{ steps.t0.outputs.start }}
           STATUS: ${{ job.status }}   # success | failure | cancelled
@@ -70,6 +71,7 @@ jobs:
                 <b>Проект:</b> <code>$REPO</code>
                 <b>Ветка:</b> <code>$REF</code>
                 <b>Коммит:</b> <code>$SHORT_SHA</code>
+                <b>Сообщение:</b> <code>$COMMIT_MESSAGE</code>
                 <b>Длительность:</b> <code>$D_HMS</code>
                 <b>Логи:</b> <a href=\"$RUN_URL\">запуск GitHub Actions</a>
                 <i>Пушнул: ${{ github.actor }}</i>"
