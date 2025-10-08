@@ -66,7 +66,7 @@ MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "future_school.middlewares.RemoveXFrameForMedia",
-    "csp.middleware.CSPMiddleware",
+    # "csp.middleware.CSPMiddleware",  # Commented out - missing csp module
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -105,34 +105,35 @@ DATABASES = {
         "NAME": BASE_DIR / "data" / "db.sqlite3",
     }
 }
-from csp.constants import SELF
-INSTALLED_APPS += ["csp"]
+# CSP configuration commented out - missing csp module
+# from csp.constants import SELF
+# INSTALLED_APPS += ["csp"]
 
 # Disable X-Frame-Options for development
 X_FRAME_OPTIONS = 'ALLOWALL'
 
-CONTENT_SECURITY_POLICY = {
-    "DIRECTIVES": {
-        # Allow embedding this site in iframes from localhost and the server IP
-        "frame-ancestors": [
-            SELF,
-            "localhost:3000",
-            "localhost:8000",
-            "http://localhost:3000",
-            "http://localhost:8000",
-            # Production IP origins (adjust if you switch to domains)
-            "http://85.198.89.128:3000",
-            "http://85.198.89.128:8000",
-            # If you terminate TLS and serve over HTTPS with a valid cert, include:
-            "https://85.198.89.128:3000",
-            "https://85.198.89.128:8000",
-        ],
-        "script-src": [SELF, "'unsafe-inline'", "https://cdn.jsdelivr.net"],
-        "style-src": [SELF, "'unsafe-inline'", "https://cdn.jsdelivr.net"],
-        "img-src": [SELF, "data:", "https://cdn.jsdelivr.net"],
-        "font-src": [SELF, "https://cdn.jsdelivr.net"],
-    },
-}
+# CONTENT_SECURITY_POLICY = {
+#     "DIRECTIVES": {
+#         # Allow embedding this site in iframes from localhost and the server IP
+#         "frame-ancestors": [
+#             SELF,
+#             "localhost:3000",
+#             "localhost:8000",
+#             "http://localhost:3000",
+#             "http://localhost:8000",
+#             # Production IP origins (adjust if you switch to domains)
+#             "http://85.198.89.128:3000",
+#             "http://85.198.89.128:8000",
+#             # If you terminate TLS and serve over HTTPS with a valid cert, include:
+#             "https://85.198.89.128:3000",
+#             "https://85.198.89.128:8000",
+#         ],
+#         "script-src": [SELF, "'unsafe-inline'", "https://cdn.jsdelivr.net"],
+#         "style-src": [SELF, "'unsafe-inline'", "https://cdn.jsdelivr.net"],
+#         "img-src": [SELF, "data:", "https://cdn.jsdelivr.net"],
+#         "font-src": [SELF, "https://cdn.jsdelivr.net"],
+#     },
+# }
 
 
 # Password validation
