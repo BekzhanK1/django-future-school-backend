@@ -113,7 +113,20 @@ X_FRAME_OPTIONS = 'ALLOWALL'
 
 CONTENT_SECURITY_POLICY = {
     "DIRECTIVES": {
-        "frame-ancestors": [SELF, "localhost:3000", "localhost:8000", "http://localhost:3000", "http://localhost:8000"],
+        # Allow embedding this site in iframes from localhost and the server IP
+        "frame-ancestors": [
+            SELF,
+            "localhost:3000",
+            "localhost:8000",
+            "http://localhost:3000",
+            "http://localhost:8000",
+            # Production IP origins (adjust if you switch to domains)
+            "http://85.198.89.128:3000",
+            "http://85.198.89.128:8000",
+            # If you terminate TLS and serve over HTTPS with a valid cert, include:
+            "https://85.198.89.128:3000",
+            "https://85.198.89.128:8000",
+        ],
         "script-src": [SELF, "'unsafe-inline'", "https://cdn.jsdelivr.net"],
         "style-src": [SELF, "'unsafe-inline'", "https://cdn.jsdelivr.net"],
         "img-src": [SELF, "data:", "https://cdn.jsdelivr.net"],
