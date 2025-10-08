@@ -76,12 +76,12 @@ class TestAutoCourseSectionAssignment(APITestCase):
         )
     
     def test_auto_assign_course_section_by_date(self):
-        """Test that course section is automatically assigned based on scheduled_at date"""
+        """Test that course section is automatically assigned based on start_date date"""
         # Test data for a test scheduled in the first quarter
         test_data = {
             'title': 'Math Test 1',
             'description': 'First quarter math test',
-            'scheduled_at': datetime(2024, 2, 15, 10, 0),  # Within first quarter
+            'start_date': datetime(2024, 2, 15, 10, 0),  # Within first quarter
             'is_published': False,
             'teacher': self.teacher.id
         }
@@ -100,7 +100,7 @@ class TestAutoCourseSectionAssignment(APITestCase):
         test_data = {
             'title': 'Math Test 2',
             'description': 'Second quarter math test',
-            'scheduled_at': datetime(2024, 5, 20, 14, 30),  # Within second quarter
+            'start_date': datetime(2024, 5, 20, 14, 30),  # Within second quarter
             'is_published': False,
             'teacher': self.teacher.id
         }
@@ -118,7 +118,7 @@ class TestAutoCourseSectionAssignment(APITestCase):
         test_data = {
             'title': 'Math Test 3',
             'description': 'Third quarter math test',
-            'scheduled_at': datetime(2024, 8, 10, 9, 0),  # Within third quarter
+            'start_date': datetime(2024, 8, 10, 9, 0),  # Within third quarter
             'is_published': False,
             'teacher': self.teacher.id
         }
@@ -136,14 +136,14 @@ class TestAutoCourseSectionAssignment(APITestCase):
         test_data = {
             'title': 'Math Test 4',
             'description': 'Test with no matching section',
-            'scheduled_at': datetime(2024, 12, 15, 10, 0),  # Outside all quarters
+            'start_date': datetime(2024, 12, 15, 10, 0),  # Outside all quarters
             'is_published': False,
             'teacher': self.teacher.id
         }
         
         serializer = CreateTestSerializer(data=test_data, context={'request': type('obj', (object,), {'user': self.teacher})()})
         self.assertFalse(serializer.is_valid())
-        self.assertIn('No course section found for the scheduled date', str(serializer.errors))
+        self.assertIn('No course section found for the start date', str(serializer.errors))
     
     def test_explicit_course_section_override(self):
         """Test that explicitly provided course_section overrides auto-assignment"""
@@ -151,7 +151,7 @@ class TestAutoCourseSectionAssignment(APITestCase):
             'course_section': self.section2.id,  # Explicitly assign to section 2
             'title': 'Math Test 5',
             'description': 'Test with explicit section',
-            'scheduled_at': datetime(2024, 2, 15, 10, 0),  # Would auto-assign to section 1
+            'start_date': datetime(2024, 2, 15, 10, 0),  # Would auto-assign to section 1
             'is_published': False,
             'teacher': self.teacher.id
         }
@@ -164,8 +164,8 @@ class TestAutoCourseSectionAssignment(APITestCase):
         # Verify that the explicitly provided section was used
         self.assertEqual(test.course_section, self.section2)
     
-    def test_no_course_section_no_scheduled_at(self):
-        """Test error when neither course_section nor scheduled_at is provided"""
+    def test_no_course_section_no_start_date(self):
+        """Test error when neither course_section nor start_date is provided"""
         test_data = {
             'title': 'Math Test 6',
             'description': 'Test without section or date',
@@ -175,7 +175,7 @@ class TestAutoCourseSectionAssignment(APITestCase):
         
         serializer = CreateTestSerializer(data=test_data, context={'request': type('obj', (object,), {'user': self.teacher})()})
         self.assertFalse(serializer.is_valid())
-        self.assertIn('Either course_section must be provided or scheduled_at must be provided', str(serializer.errors))
+        self.assertIn('Either course_section must be provided or start_date must be provided', str(serializer.errors))
     
     def test_subject_group_information_in_response(self):
         """Test that subject group information is included in test response"""
@@ -183,7 +183,7 @@ class TestAutoCourseSectionAssignment(APITestCase):
         test_data = {
             'title': 'Math Test with Subject Group Info',
             'description': 'Test to verify subject group info is shown',
-            'scheduled_at': datetime(2024, 2, 15, 10, 0),  # Within first quarter
+            'start_date': datetime(2024, 2, 15, 10, 0),  # Within first quarter
             'is_published': False,
         }
         
@@ -197,7 +197,7 @@ class TestAutoCourseSectionAssignment(APITestCase):
         response_data = response_serializer.data
         
         # Verify subject group information is included
-        self.assertIn('subject_group_id', response_data)
+        self.assertIn('subject_group', response_data)
         self.assertIn('classroom_name', response_data)
         self.assertIn('classroom_grade', response_data)
         self.assertIn('classroom_letter', response_data)
@@ -206,7 +206,7 @@ class TestAutoCourseSectionAssignment(APITestCase):
         self.assertIn('course_section_title', response_data)
         
         # Verify the values are correct
-        self.assertEqual(response_data['subject_group_id'], self.subject_group.id)
+        self.assertEqual(response_data['subject_group'], self.subject_group.id)
         self.assertEqual(response_data['classroom_grade'], 10)
         self.assertEqual(response_data['classroom_letter'], 'A')
         self.assertEqual(response_data['course_name'], 'Mathematics')
@@ -219,7 +219,7 @@ class TestAutoCourseSectionAssignment(APITestCase):
             'subject_group': self.subject_group.id,
             'title': 'Math Test with Subject Group',
             'description': 'Test with subject group specified',
-            'scheduled_at': datetime(2024, 2, 15, 10, 0),  # Within first quarter
+            'start_date': datetime(2024, 2, 15, 10, 0),  # Within first quarter
             'is_published': False,
         }
         
@@ -251,10 +251,10 @@ class TestAutoCourseSectionAssignment(APITestCase):
             'subject_group': another_subject_group.id,
             'title': 'Physics Test',
             'description': 'Test for physics subject group',
-            'scheduled_at': datetime(2024, 2, 15, 10, 0),  # No sections for this subject group
+            'start_date': datetime(2024, 2, 15, 10, 0),  # No sections for this subject group
             'is_published': False,
         }
         
         serializer = CreateTestSerializer(data=test_data, context={'request': type('obj', (object,), {'user': self.teacher})()})
         self.assertFalse(serializer.is_valid())
-        self.assertIn('No course section found for the scheduled date', str(serializer.errors))
+        self.assertIn('No course section found for the start date', str(serializer.errors))

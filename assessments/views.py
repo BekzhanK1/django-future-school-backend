@@ -64,12 +64,12 @@ class TestViewSet(viewsets.ModelViewSet):
     ]
     search_fields = ['title', 'description']
     ordering_fields = [
-        'scheduled_at', 
+        'start_date', 
         'title', 
         'created_at', 
         'total_points'
     ]
-    ordering = ['-scheduled_at', '-created_at']
+    ordering = ['-start_date', '-created_at']
     
     def get_serializer_class(self):
         if self.action == 'create':

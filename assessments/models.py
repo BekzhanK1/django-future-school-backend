@@ -15,7 +15,6 @@ class Test(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField(null=True, blank=True)
     is_published = models.BooleanField(default=True)
-    scheduled_at = models.DateTimeField(null=True, blank=True)
     reveal_results_at = models.DateTimeField(null=True, blank=True)
     
     # Time management
