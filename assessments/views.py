@@ -22,7 +22,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema
 from drf_spectacular.types import OpenApiTypes
 
-from schools.permissions import IsSuperAdmin, IsSchoolAdminOrSuperAdmin, IsTeacherOrAbove
+from schools.permissions import IsSuperAdmin, IsSchoolAdminOrSuperAdmin, IsTeacherOrAbove, IsStudentOrTeacherOrAbove
 from learning.role_permissions import RoleBasedPermission
 from users.models import UserRole
 
@@ -53,7 +53,7 @@ class TestViewSet(viewsets.ModelViewSet):
     ).prefetch_related('questions__options').all()
     
     serializer_class = TestSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsStudentOrTeacherOrAbove]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     
     filterset_fields = [
@@ -501,7 +501,7 @@ class OptionViewSet(viewsets.ModelViewSet):
     
     queryset = Option.objects.select_related('question__test').all()
     serializer_class = OptionSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsStudentOrTeacherOrAbove]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['question', 'is_correct']
     search_fields = ['text']
@@ -519,7 +519,7 @@ class QuestionViewSet(viewsets.ModelViewSet):
     
     queryset = Question.objects.select_related('test').prefetch_related('options').all()
     serializer_class = QuestionSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsStudentOrTeacherOrAbove]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     
     filterset_fields = ['test', 'type']
@@ -552,7 +552,7 @@ class AttemptViewSet(viewsets.ModelViewSet):
     ).prefetch_related('answers__question', 'answers__selected_options').all()
     
     serializer_class = AttemptSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsStudentOrTeacherOrAbove]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     
     filterset_fields = ['test', 'student', 'is_completed', 'is_graded']
@@ -781,7 +781,7 @@ class AnswerViewSet(viewsets.ModelViewSet):
     ).prefetch_related('selected_options').all()
     
     serializer_class = AnswerSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsStudentOrTeacherOrAbove]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     
     filterset_fields = ['attempt', 'question', 'is_correct']
