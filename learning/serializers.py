@@ -53,6 +53,10 @@ class AssignmentAttachmentSerializer(serializers.ModelSerializer):
     class Meta:
         model = AssignmentAttachment
         fields = ['id', 'type', 'title', 'content', 'file_url', 'file', 'position', 'assignment']
+        extra_kwargs = {
+            # Allow nested creation without explicitly providing assignment id
+            'assignment': { 'required': False }
+        }
 
 
 class AssignmentSerializer(serializers.ModelSerializer):
@@ -63,7 +67,8 @@ class AssignmentSerializer(serializers.ModelSerializer):
     teacher_username = serializers.CharField(source='teacher.username', read_only=True)
     teacher_fullname = serializers.CharField(source='teacher.get_full_name', read_only=True)
     submission_count = serializers.SerializerMethodField()
-    attachments = AssignmentAttachmentSerializer(many=True, read_only=True)
+    # Allow reading existing attachments and writing new ones in one request
+    attachments = AssignmentAttachmentSerializer(many=True, required=False)
     is_available = serializers.SerializerMethodField()
     is_deadline_passed = serializers.SerializerMethodField()
     is_submitted = serializers.SerializerMethodField()
@@ -141,6 +146,14 @@ class AssignmentSerializer(serializers.ModelSerializer):
             return SubmissionSerializer(submissions, many=True, context=self.context).data
         except Exception:
             return None
+
+    def create(self, validated_data):
+        attachments_data = validated_data.pop('attachments', [])
+        assignment = Assignment.objects.create(**validated_data)
+        # Create nested attachments if provided
+        for attachment_data in attachments_data:
+            AssignmentAttachment.objects.create(assignment=assignment, **attachment_data)
+        return assignment
 
 
 class SubmissionAttachmentSerializer(serializers.ModelSerializer):
