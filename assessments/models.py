@@ -194,14 +194,53 @@ class Answer(models.Model):
                 return 0
                 
             correct_pairs = self.question.matching_pairs_json or []
-            correct_count = 0
+            if not correct_pairs:
+                return 0
+            
+            # Create a normalized set of correct pairs for comparison (case-insensitive)
+            correct_pairs_set = set()
+            for pair in correct_pairs:
+                if isinstance(pair, dict) and 'left' in pair and 'right' in pair:
+                    # Normalize by stripping whitespace and converting to lowercase
+                    left = str(pair['left']).strip().lower()
+                    right = str(pair['right']).strip().lower()
+                    correct_pairs_set.add((left, right))
+            
+            # Process student answers
+            student_pairs_set = set()
+            valid_answers = []
             
             for answer_pair in self.matching_answers_json:
-                if answer_pair in correct_pairs:
+                if isinstance(answer_pair, dict) and 'left' in answer_pair and 'right' in answer_pair:
+                    # Normalize student answer (case-insensitive)
+                    left = str(answer_pair['left']).strip().lower()
+                    right = str(answer_pair['right']).strip().lower()
+                    
+                    # Skip duplicates
+                    if (left, right) not in student_pairs_set:
+                        student_pairs_set.add((left, right))
+                        valid_answers.append((left, right))
+            
+            # Count correct matches
+            correct_count = 0
+            for student_pair in valid_answers:
+                if student_pair in correct_pairs_set:
                     correct_count += 1
             
-            if correct_pairs:
-                return (correct_count / len(correct_pairs)) * self.question.points
+            # Check if student provided incorrect pairs (penalty)
+            incorrect_count = len(valid_answers) - correct_count
+            
+            # Calculate score with penalty for incorrect pairs
+            if len(correct_pairs_set) > 0:
+                # Full credit only if all correct pairs are matched and no incorrect pairs
+                if correct_count == len(correct_pairs_set) and incorrect_count == 0:
+                    return self.question.points
+                # Partial credit: proportion of correct pairs minus penalty for incorrect
+                else:
+                    score_ratio = (correct_count / len(correct_pairs_set)) - (incorrect_count * 0.25 / len(correct_pairs_set))
+                    # Ensure score doesn't go below 0
+                    score_ratio = max(0, score_ratio)
+                    return score_ratio * self.question.points
             return 0
         
         return 0
