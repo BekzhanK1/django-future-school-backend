@@ -211,7 +211,7 @@ class ChangePasswordView(APIView):
 
 
 class RequestPasswordResetSerializer(serializers.Serializer):
-    email = serializers.EmailField()
+    username = serializers.CharField()
 
 
 class ConfirmPasswordResetSerializer(serializers.Serializer):
@@ -232,7 +232,7 @@ def request_password_reset(request):
     serializer = RequestPasswordResetSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     try:
-        user = User.objects.get(email=serializer.validated_data["email"])
+        user = User.objects.get(username=serializer.validated_data["username"])
     except User.DoesNotExist:
         return Response(status=status.HTTP_204_NO_CONTENT)
     token = PasswordResetToken.objects.create(
