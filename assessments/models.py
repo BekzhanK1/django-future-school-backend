@@ -1,5 +1,6 @@
 from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator
+from difflib import SequenceMatcher
 
 
 class QuestionType(models.TextChoices):
@@ -186,7 +187,25 @@ class Answer(models.Model):
                 else:
                     return 0
             
-            # If no key_words provided, requires manual grading
+            # If no key_words provided, try exact/fuzzy matching with correct_answer_text
+            if self.question.correct_answer_text:
+                # If student didn't provide an answer, it's incorrect
+                if not self.text_answer:
+                    return 0
+                # Normalize: lowercase, strip, collapse internal whitespace
+                expected = " ".join(self.question.correct_answer_text.strip().lower().split())
+                given = " ".join(self.text_answer.strip().lower().split())
+                # Exact match
+                if expected == given:
+                    return self.question.points
+                # Fuzzy match using similarity ratio
+                similarity = SequenceMatcher(None, expected, given).ratio()
+                # Threshold for "almost correct" answers
+                if similarity >= 0.85:
+                    return self.question.points
+                return 0
+            
+            # If neither keywords nor correct_answer_text are provided, requires manual grading
             return None
             
         elif self.question.type == QuestionType.MATCHING:
