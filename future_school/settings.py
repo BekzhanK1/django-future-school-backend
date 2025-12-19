@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     "learning",
     "lessons",
     "assessments",
+    "forum",
     "microsoft_graph",
     "common",
 ]
