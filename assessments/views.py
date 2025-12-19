@@ -117,6 +117,40 @@ class TestViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(test)
         return Response(serializer.data)
 
+    @extend_schema(
+        operation_id='tests_open_to_review',
+        summary='Open test results for students to review',
+        request=None,
+        responses={200: TestSerializer, 403: OpenApiTypes.OBJECT},
+        tags=['Tests']
+    )
+    @action(detail=True, methods=['post'], url_path='open-to-review')
+    def open_to_review(self, request, pk=None):
+        """
+        Allow students to see their results (answers/score) before the original reveal time.
+
+        This sets `reveal_results_at` to current time so that:
+        - `TestSerializer.can_see_results` becomes True
+        - `Attempt.can_view_results` starts returning True for completed attempts.
+
+        Intended to be used as a teacher "Open to review" button.
+        """
+        test = self.get_object()
+
+        # Only the test teacher can open results for review
+        if request.user != test.teacher:
+            return Response(
+                {'error': 'You can only open results for your own tests'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        from django.utils import timezone
+        test.reveal_results_at = timezone.now()
+        test.save(update_fields=['reveal_results_at'])
+
+        serializer = self.get_serializer(test)
+        return Response(serializer.data)
+
     @action(detail=False, methods=['post'], url_path='create-full')
     def create_full(self, request):
         """Create a test and its questions in a single request.

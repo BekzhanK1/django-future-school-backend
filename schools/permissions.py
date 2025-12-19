@@ -10,7 +10,7 @@ class IsSuperAdmin(permissions.BasePermission):
 class IsSchoolAdminOrSuperAdmin(permissions.BasePermission):
     def has_permission(self, request, view):
         return (
-            request.user.is_authenticated and 
+            request.user.is_authenticated and
             request.user.role in [UserRole.SUPERADMIN, UserRole.SCHOOLADMIN]
         )
 
@@ -19,14 +19,21 @@ class IsTeacherOrAbove(permissions.BasePermission):
     def has_permission(self, request, view):
         print(request.user)
         return (
-            request.user.is_authenticated and 
-            request.user.role in [UserRole.SUPERADMIN, UserRole.SCHOOLADMIN, UserRole.TEACHER]
+            request.user.is_authenticated and
+            request.user.role in [UserRole.SUPERADMIN,
+                                  UserRole.SCHOOLADMIN, UserRole.TEACHER]
         )
 
 
 class IsStudentOrTeacherOrAbove(permissions.BasePermission):
     def has_permission(self, request, view):
         return (
-            request.user.is_authenticated and 
-            request.user.role in [UserRole.SUPERADMIN, UserRole.SCHOOLADMIN, UserRole.TEACHER, UserRole.STUDENT]
+            request.user.is_authenticated and
+            request.user.role in [
+                UserRole.SUPERADMIN,
+                UserRole.SCHOOLADMIN,
+                UserRole.TEACHER,
+                UserRole.STUDENT,
+                UserRole.PARENT,
+            ]
         )

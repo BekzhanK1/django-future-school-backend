@@ -9,6 +9,7 @@ class UserRole(models.TextChoices):
     SCHOOLADMIN = "schooladmin", "School Admin"
     TEACHER = "teacher", "Teacher"
     STUDENT = "student", "Student"
+    PARENT = "parent", "Parent"
 
 
 class UserManager(BaseUserManager):
@@ -17,7 +18,7 @@ class UserManager(BaseUserManager):
             raise ValueError('The Username field must be set')
         if not email:
             raise ValueError('The Email field must be set')
-        
+
         email = self.normalize_email(email)
         user = self.model(
             username=username,
@@ -32,12 +33,12 @@ class UserManager(BaseUserManager):
     def create_superuser(self, username, email=None, password=None, role=UserRole.SUPERADMIN, **extra_fields):
         extra_fields.setdefault('is_staff', True)
         extra_fields.setdefault('is_superuser', True)
-        
+
         if extra_fields.get('is_staff') is not True:
             raise ValueError('Superuser must have is_staff=True.')
         if extra_fields.get('is_superuser') is not True:
             raise ValueError('Superuser must have is_superuser=True.')
-        
+
         return self.create_user(username, email, password, role, **extra_fields)
 
 
@@ -46,13 +47,25 @@ class User(AbstractUser):
     first_name = models.CharField(max_length=150, blank=True)
     last_name = models.CharField(max_length=150, blank=True)
     phone_number = models.CharField(max_length=20, blank=True, null=True)
-    role = models.CharField(max_length=32, choices=UserRole.choices, default=UserRole.STUDENT)
+    role = models.CharField(
+        max_length=32, choices=UserRole.choices, default=UserRole.STUDENT)
     is_active = models.BooleanField(default=True)
-    kundelik_id = models.CharField(max_length=255, null=True, blank=True, unique=True)
+    kundelik_id = models.CharField(
+        max_length=255, null=True, blank=True, unique=True)
     school = models.ForeignKey(
         "schools.School", on_delete=models.SET_NULL, null=True, blank=True, related_name="users"
     )
-    
+    # Parent–child relationship: one parent can have multiple children (students),
+    # and a student can have multiple parents.
+    children = models.ManyToManyField(
+        "self",
+        symmetrical=False,
+        related_name="parents",
+        blank=True,
+        limit_choices_to={"role": UserRole.STUDENT},
+        help_text="For parent accounts: linked student children."
+    )
+
     objects = UserManager()
 
     def get_full_name(self) -> str:
@@ -63,7 +76,8 @@ class User(AbstractUser):
 
 
 class AuthSession(models.Model):
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="auth_sessions")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="auth_sessions")
     refresh_token = models.CharField(max_length=512, unique=True)
     user_agent = models.CharField(max_length=512, null=True, blank=True)
     ip_address = models.CharField(max_length=64, null=True, blank=True)
@@ -76,7 +90,8 @@ class AuthSession(models.Model):
 
 
 class PasswordResetToken(models.Model):
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="password_reset_tokens")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="password_reset_tokens")
     token = models.CharField(max_length=512, unique=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField()
@@ -96,6 +111,3 @@ class PasswordResetToken(models.Model):
 
     def __str__(self) -> str:
         return f"PRT {self.user_id}"
-
-
-

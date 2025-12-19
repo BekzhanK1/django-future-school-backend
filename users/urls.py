@@ -10,12 +10,14 @@ from .views import (
     AuthSessionViewSet,
     PasswordResetTokenViewSet,
     CheckAccessView,
+    ParentChildViewSet,
 )
 
 router = DefaultRouter()
 router.register(r'users', UserViewSet)
 router.register(r'auth-sessions', AuthSessionViewSet)
 router.register(r'password-reset-tokens', PasswordResetTokenViewSet)
+router.register(r'parent-child', ParentChildViewSet, basename='parent-child')
 
 urlpatterns = [
     path("auth/login/", LoginView.as_view(), name="token_obtain_pair"),

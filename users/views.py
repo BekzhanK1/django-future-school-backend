@@ -10,9 +10,13 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
+from rest_framework.decorators import action
 
-from .models import AuthSession, PasswordResetToken, User
-from .serializers import UserSerializer, UserCreateSerializer, AuthSessionSerializer, PasswordResetTokenSerializer
+from .models import AuthSession, PasswordResetToken, User, UserRole
+from .serializers import (
+    UserSerializer, UserCreateSerializer, AuthSessionSerializer, PasswordResetTokenSerializer,
+    ParentChildSerializer, BulkParentChildSerializer
+)
 from .access_checker import AccessChecker
 from .access_serializers import CheckAccessRequestSerializer, CheckAccessResponseSerializer
 from schools.permissions import IsSuperAdmin, IsSchoolAdminOrSuperAdmin
@@ -286,7 +290,7 @@ def confirm_password_reset(request):
 
 
 class UserViewSet(ModelViewSet):
-    queryset = User.objects.select_related('school').all()
+    queryset = User.objects.select_related('school').prefetch_related('children', 'parents').all()
     serializer_class = UserSerializer
     permission_classes = [IsSuperAdmin]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -382,3 +386,159 @@ class CheckAccessView(APIView):
         response_serializer.is_valid(raise_exception=True)
         
         return Response(response_serializer.data, status=status.HTTP_200_OK)
+
+
+class ParentChildViewSet(ModelViewSet):
+    """
+    ViewSet for managing parent-child relationships.
+    Only superadmins can manage these relationships.
+    """
+    permission_classes = [IsSuperAdmin]
+    
+    @extend_schema(
+        operation_id='parent_child_add',
+        summary='Add a child to a parent',
+        request=ParentChildSerializer,
+        responses={201: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT},
+        tags=['Parent-Child Relationships']
+    )
+    @action(detail=False, methods=['post'], url_path='add')
+    def add_relationship(self, request):
+        """Add a child (student) to a parent"""
+        serializer = ParentChildSerializer(data=request.data)
+        if serializer.is_valid():
+            parent_id = serializer.validated_data['parent_id']
+            child_id = serializer.validated_data['child_id']
+            
+            parent = User.objects.get(id=parent_id)
+            child = User.objects.get(id=child_id)
+            
+            # Add child to parent's children
+            parent.children.add(child)
+            
+            return Response({
+                'message': f'Child {child.username} added to parent {parent.username}',
+                'parent_id': parent_id,
+                'child_id': child_id
+            }, status=status.HTTP_201_CREATED)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    @extend_schema(
+        operation_id='parent_child_remove',
+        summary='Remove a child from a parent',
+        request=ParentChildSerializer,
+        responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT},
+        tags=['Parent-Child Relationships']
+    )
+    @action(detail=False, methods=['post'], url_path='remove')
+    def remove_relationship(self, request):
+        """Remove a child (student) from a parent"""
+        serializer = ParentChildSerializer(data=request.data)
+        if serializer.is_valid():
+            parent_id = serializer.validated_data['parent_id']
+            child_id = serializer.validated_data['child_id']
+            
+            parent = User.objects.get(id=parent_id)
+            child = User.objects.get(id=child_id)
+            
+            # Remove child from parent's children
+            parent.children.remove(child)
+            
+            return Response({
+                'message': f'Child {child.username} removed from parent {parent.username}',
+                'parent_id': parent_id,
+                'child_id': child_id
+            }, status=status.HTTP_200_OK)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    @extend_schema(
+        operation_id='parent_child_bulk_add',
+        summary='Bulk add children to a parent',
+        request=BulkParentChildSerializer,
+        responses={201: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT},
+        tags=['Parent-Child Relationships']
+    )
+    @action(detail=False, methods=['post'], url_path='bulk-add')
+    def bulk_add(self, request):
+        """Bulk add multiple children to a parent"""
+        serializer = BulkParentChildSerializer(data=request.data)
+        if serializer.is_valid():
+            parent_id = serializer.validated_data['parent_id']
+            child_ids = serializer.validated_data['child_ids']
+            
+            parent = User.objects.get(id=parent_id)
+            children = User.objects.filter(id__in=child_ids)
+            
+            # Add all children to parent
+            parent.children.add(*children)
+            
+            return Response({
+                'message': f'{children.count()} children added to parent {parent.username}',
+                'parent_id': parent_id,
+                'child_ids': child_ids,
+                'added_count': children.count()
+            }, status=status.HTTP_201_CREATED)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    @extend_schema(
+        operation_id='parent_child_bulk_remove',
+        summary='Bulk remove children from a parent',
+        request=BulkParentChildSerializer,
+        responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT},
+        tags=['Parent-Child Relationships']
+    )
+    @action(detail=False, methods=['post'], url_path='bulk-remove')
+    def bulk_remove(self, request):
+        """Bulk remove multiple children from a parent"""
+        serializer = BulkParentChildSerializer(data=request.data)
+        if serializer.is_valid():
+            parent_id = serializer.validated_data['parent_id']
+            child_ids = serializer.validated_data['child_ids']
+            
+            parent = User.objects.get(id=parent_id)
+            children = User.objects.filter(id__in=child_ids)
+            
+            # Remove all children from parent
+            parent.children.remove(*children)
+            
+            return Response({
+                'message': f'{children.count()} children removed from parent {parent.username}',
+                'parent_id': parent_id,
+                'child_ids': child_ids,
+                'removed_count': children.count()
+            }, status=status.HTTP_200_OK)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    @extend_schema(
+        operation_id='parent_child_list',
+        summary='List all parent-child relationships',
+        responses={200: OpenApiTypes.OBJECT},
+        tags=['Parent-Child Relationships']
+    )
+    @action(detail=False, methods=['get'], url_path='list')
+    def list_relationships(self, request):
+        """List all parent-child relationships"""
+        parents = User.objects.filter(role=UserRole.PARENT).prefetch_related('children').all()
+        
+        relationships = []
+        for parent in parents:
+            for child in parent.children.all():
+                relationships.append({
+                    'parent_id': parent.id,
+                    'parent_username': parent.username,
+                    'parent_email': parent.email,
+                    'parent_name': f'{parent.first_name} {parent.last_name}'.strip() or parent.username,
+                    'child_id': child.id,
+                    'child_username': child.username,
+                    'child_email': child.email,
+                    'child_name': f'{child.first_name} {child.last_name}'.strip() or child.username,
+                })
+        
+        return Response({
+            'count': len(relationships),
+            'relationships': relationships
+        }, status=status.HTTP_200_OK)

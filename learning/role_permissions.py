@@ -75,6 +75,10 @@ class RoleBasedPermission(permissions.BasePermission):
         # Student can access their own data
         if request.user.role == UserRole.STUDENT:
             return True
+
+        # Parent: spectator mode, read-only
+        if request.user.role == UserRole.PARENT:
+            return request.method in permissions.SAFE_METHODS
         
         return False
     
@@ -137,6 +141,40 @@ class RoleBasedPermission(permissions.BasePermission):
                 student_classrooms = user.classroom_users.values_list('classroom', flat=True)
                 return obj.classroom.id in student_classrooms
             
+            return False
+        
+        # Parent: spectator mode, can view data related to their children (students) only
+        if user.role == UserRole.PARENT:
+            # Direct student link
+            children_qs = user.children.all()
+            if hasattr(obj, 'student'):
+                return obj.student in children_qs
+            if hasattr(obj, 'user'):
+                return obj.user in children_qs
+
+            # Objects linked via subject_group / course_section / classroom are allowed
+            # if any of the parent's children is in that classroom.
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+
+            def child_classroom_ids():
+                return User.objects.filter(
+                    id__in=children_qs.values_list('id', flat=True)
+                ).values_list('classroom_users__classroom', flat=True)
+
+            classrooms = set(child_classroom_ids())
+
+            if hasattr(obj, 'subject_group') and hasattr(obj.subject_group, 'classroom'):
+                return obj.subject_group.classroom.id in classrooms
+
+            if hasattr(obj, 'course_section') and hasattr(obj.course_section, 'subject_group'):
+                sg = obj.course_section.subject_group
+                if hasattr(sg, 'classroom'):
+                    return sg.classroom.id in classrooms
+
+            if hasattr(obj, 'classroom'):
+                return obj.classroom.id in classrooms
+
             return False
         
         return False
