@@ -29,6 +29,7 @@ class ForumThreadViewSet(viewsets.ModelViewSet):
         ForumThread.objects.select_related(
             "subject_group__classroom",
             "subject_group__course",
+            "subject_group__teacher",
             "created_by",
         )
         .prefetch_related("posts__author")
@@ -117,7 +118,7 @@ class ForumPostViewSet(viewsets.ModelViewSet):
     """
 
     queryset = ForumPost.objects.select_related(
-        "thread", "author", "thread__subject_group"
+        "thread", "author", "thread__subject_group", "thread__subject_group__teacher", "thread__created_by"
     ).all()
     serializer_class = ForumPostSerializer
     permission_classes = [RoleBasedPermission]
@@ -125,6 +126,42 @@ class ForumPostViewSet(viewsets.ModelViewSet):
     filterset_fields = ["thread"]
     ordering_fields = ["created_at"]
     ordering = ["created_at"]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = super().get_queryset()
+
+        # Superadmin / schooladmin: full access
+        if user.role in [UserRole.SUPERADMIN, UserRole.SCHOOLADMIN]:
+            return qs
+
+        # Teacher: posts in threads from their subject groups
+        if user.role == UserRole.TEACHER:
+            return qs.filter(thread__subject_group__teacher=user)
+
+        # Student: posts in threads they can access (public or created by them)
+        if user.role == UserRole.STUDENT:
+            classroom_ids = ClassroomUser.objects.filter(user=user).values_list(
+                "classroom_id", flat=True
+            )
+            return qs.filter(
+                thread__subject_group__classroom_id__in=classroom_ids
+            ).filter(
+                models.Q(thread__is_public=True) | models.Q(thread__created_by=user)
+            )
+
+        # Parent: only posts in public threads from their children's classrooms
+        if user.role == UserRole.PARENT:
+            child_classrooms = user.children.values_list(
+                "classroom_users__classroom_id", flat=True
+            )
+            return qs.filter(
+                thread__subject_group__classroom_id__in=child_classrooms,
+                thread__is_public=True,
+            )
+
+        # Other roles: no access
+        return qs.none()
 
     def perform_create(self, serializer):
         serializer.save(author=self.request.user)

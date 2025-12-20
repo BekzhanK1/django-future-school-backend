@@ -101,22 +101,51 @@ class RoleBasedPermission(permissions.BasePermission):
         # Teacher can access their assigned content
         if user.role == UserRole.TEACHER:
             if hasattr(obj, 'teacher'):
-                return obj.teacher == user
+                return obj.teacher_id == user.id if hasattr(obj, 'teacher_id') else obj.teacher == user
+            
+            if hasattr(obj, 'subject_group'):
+                # ForumThread: check if teacher is assigned to the subject group
+                try:
+                    return obj.subject_group.teacher_id == user.id
+                except (AttributeError, ValueError):
+                    return False
+            if hasattr(obj, 'thread'):
+                # ForumPost: check if teacher is assigned to the thread's subject group
+                try:
+                    return obj.thread.subject_group.teacher_id == user.id
+                except (AttributeError, ValueError):
+                    return False
             if hasattr(obj, 'course_section'):
-                return obj.course_section.subject_group.teacher == user
+                try:
+                    return obj.course_section.subject_group.teacher_id == user.id
+                except Exception:
+                    return False
             if hasattr(obj, 'assignment'):
-                return obj.assignment.teacher == user
+                try:
+                    return obj.assignment.teacher_id == user.id
+                except Exception:
+                    return False
             if hasattr(obj, 'test'):
-                return obj.test.teacher == user
+                try:
+                    return obj.test.teacher_id == user.id
+                except Exception:
+                    return False
             if hasattr(obj, 'submission'):
                 # For Grade objects, check if the submission's assignment belongs to the teacher
-                return obj.submission.assignment.teacher == user
+                try:
+                    return obj.submission.assignment.teacher_id == user.id
+                except Exception:
+                    return False
             if hasattr(obj, 'graded_by'):
                 # For Grade objects, check if the teacher is the one who graded it OR if the assignment belongs to the teacher
-                if obj.graded_by == user:
-                    return True
-                if hasattr(obj, 'submission'):
-                    return obj.submission.assignment.teacher == user
+                try:
+                    if obj.graded_by_id == user.id:
+                        return True
+                    if hasattr(obj, 'submission'):
+                        return obj.submission.assignment.teacher_id == user.id
+                except Exception:
+                    pass
+                return False
             return False
         
         # Student can access their own data and resources from their enrolled courses
@@ -126,11 +155,47 @@ class RoleBasedPermission(permissions.BasePermission):
                 return obj.student == user
             if hasattr(obj, 'user'):
                 return obj.user == user
+            if hasattr(obj, 'author'):
+                # ForumPost: students can see posts if they created them or if they can see the thread
+                if obj.author == user:
+                    return True
+                if hasattr(obj, 'thread'):
+                    thread = obj.thread
+                    student_classrooms = user.classroom_users.values_list('classroom', flat=True)
+                    # Check if student is in the same classroom as the thread's subject group
+                    if hasattr(thread, 'subject_group') and hasattr(thread.subject_group, 'classroom'):
+                        classroom_match = thread.subject_group.classroom.id in student_classrooms
+                        if not classroom_match:
+                            return False
+                        # For private threads, only the creator and teacher can see posts
+                        # For public threads, all students in the classroom can see posts
+                        if hasattr(thread, 'is_public'):
+                            if thread.is_public:
+                                return True  # Public thread: all students in classroom can see
+                            else:
+                                # Private thread: only creator and teacher can see
+                                if hasattr(thread, 'created_by'):
+                                    return thread.created_by == user
+                                return False
+                        return True
+                    return False
             
             # Check if student is enrolled in the classroom/subject group
             if hasattr(obj, 'subject_group'):
                 student_classrooms = user.classroom_users.values_list('classroom', flat=True)
-                return obj.subject_group.classroom.id in student_classrooms
+                classroom_match = obj.subject_group.classroom.id in student_classrooms
+                if not classroom_match:
+                    return False
+                # ForumThread: check if thread is public or student created it
+                if hasattr(obj, 'is_public'):
+                    if obj.is_public:
+                        return True  # Public thread: all students in classroom can see
+                    else:
+                        # Private thread: only creator can see
+                        if hasattr(obj, 'created_by'):
+                            return obj.created_by == user
+                        return False
+                return True
             
             if hasattr(obj, 'course_section'):
                 student_classrooms = user.classroom_users.values_list('classroom', flat=True)
