@@ -105,7 +105,7 @@ DATABASES = {
         "NAME": BASE_DIR / "data" / "db.sqlite3",
     }
 }
-from csp.constants import SELF
+from csp import CSP
 INSTALLED_APPS += ["csp"]
 
 # Disable X-Frame-Options for development
@@ -115,7 +115,7 @@ CONTENT_SECURITY_POLICY = {
     "DIRECTIVES": {
         # Allow embedding this site in iframes from localhost and the server IP
         "frame-ancestors": [
-            SELF,
+            CSP.SELF,
             "localhost:3000",
             "localhost:8000",
             "http://localhost:3000",
@@ -127,10 +127,10 @@ CONTENT_SECURITY_POLICY = {
             "https://85.198.89.128:3000",
             "https://85.198.89.128:8000",
         ],
-        "script-src": [SELF, "'unsafe-inline'", "https://cdn.jsdelivr.net"],
-        "style-src": [SELF, "'unsafe-inline'", "https://cdn.jsdelivr.net"],
-        "img-src": [SELF, "data:", "https://cdn.jsdelivr.net"],
-        "font-src": [SELF, "https://cdn.jsdelivr.net"],
+        "script-src": [CSP.SELF, "'unsafe-inline'", "https://cdn.jsdelivr.net"],
+        "style-src": [CSP.SELF, "'unsafe-inline'", "https://cdn.jsdelivr.net"],
+        "img-src": [CSP.SELF, "data:", "https://cdn.jsdelivr.net"],
+        "font-src": [CSP.SELF, "https://cdn.jsdelivr.net"],
     },
 }
 
