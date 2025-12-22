@@ -105,34 +105,51 @@ DATABASES = {
         "NAME": BASE_DIR / "data" / "db.sqlite3",
     }
 }
-from csp import CSP
 INSTALLED_APPS += ["csp"]
 
-# Disable X-Frame-Options for development
-X_FRAME_OPTIONS = 'ALLOWALL'
+# Disable X-Frame-Options in favor of CSP
+X_FRAME_OPTIONS = 'SAMEORIGIN'
 
-CONTENT_SECURITY_POLICY = {
-    "DIRECTIVES": {
-        # Allow embedding this site in iframes from localhost and the server IP
-        "frame-ancestors": [
-            CSP.SELF,
-            "localhost:3000",
-            "localhost:8000",
-            "http://localhost:3000",
-            "http://localhost:8000",
-            # Production IP origins (adjust if you switch to domains)
-            "http://85.198.89.128:3000",
-            "http://85.198.89.128:8000",
-            # If you terminate TLS and serve over HTTPS with a valid cert, include:
-            "https://85.198.89.128:3000",
-            "https://85.198.89.128:8000",
-        ],
-        "script-src": [CSP.SELF, "'unsafe-inline'", "https://cdn.jsdelivr.net"],
-        "style-src": [CSP.SELF, "'unsafe-inline'", "https://cdn.jsdelivr.net"],
-        "img-src": [CSP.SELF, "data:", "https://cdn.jsdelivr.net"],
-        "font-src": [CSP.SELF, "https://cdn.jsdelivr.net"],
-    },
-}
+# CSP Configuration (Flat variables, not a dictionary)
+CSP_DEFAULT_SRC = ("'self'", "https://cdn.jsdelivr.net")
+
+# Frame Ancestors (Who can embed your site)
+CSP_FRAME_ANCESTORS = (
+    "'self'",
+    "http://localhost:3000",
+    "http://localhost:8000",
+    "http://85.198.89.128:3000",
+    "http://85.198.89.128:8000",
+    "https://85.198.89.128:3000",
+    "https://85.198.89.128:8000",
+)
+
+# Script Sources
+CSP_SCRIPT_SRC = (
+    "'self'",
+    "'unsafe-inline'",
+    "https://cdn.jsdelivr.net",
+)
+
+# Style Sources
+CSP_STYLE_SRC = (
+    "'self'",
+    "'unsafe-inline'",
+    "https://cdn.jsdelivr.net",
+)
+
+# Image Sources
+CSP_IMG_SRC = (
+    "'self'",
+    "data:",
+    "https://cdn.jsdelivr.net",
+)
+
+# Font Sources
+CSP_FONT_SRC = (
+    "'self'",
+    "https://cdn.jsdelivr.net",
+)
 
 
 # Password validation
@@ -206,7 +223,8 @@ DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER)
 # Celery configuration
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
-CELERY_TASK_ALWAYS_EAGER = os.getenv("CELERY_TASK_ALWAYS_EAGER", "false").lower() == "true"
+CELERY_TASK_ALWAYS_EAGER = os.getenv(
+    "CELERY_TASK_ALWAYS_EAGER", "false").lower() == "true"
 CELERY_TASK_TIME_LIMIT = 30 * 60
 CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60
 CELERY_ACCEPT_CONTENT = ["json"]

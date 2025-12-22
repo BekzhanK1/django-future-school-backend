@@ -87,6 +87,17 @@ class ResourceViewSet(viewsets.ModelViewSet):
         
         return queryset
 
+    @action(detail=True, methods=['post'], url_path='unlink-from-template')
+    def unlink_from_template(self, request, pk=None):
+        """
+        Unlink this resource from its template so it will no longer be auto-synced.
+        """
+        resource = self.get_object()
+        resource.is_unlinked_from_template = True
+        resource.save(update_fields=['is_unlinked_from_template'])
+        serializer = self.get_serializer(resource)
+        return Response(serializer.data)
+
     @action(detail=False, methods=['patch'], url_path='change-items-order')
     def change_items_order(self, request):
         """Bulk update resource positions.
@@ -418,6 +429,17 @@ class AssignmentViewSet(viewsets.ModelViewSet):
             permission_classes = [RoleBasedPermission]
         
         return [permission() for permission in permission_classes]
+
+    @action(detail=True, methods=['post'], url_path='unlink-from-template')
+    def unlink_from_template(self, request, pk=None):
+        """
+        Unlink this assignment from its template so it will no longer be auto-synced.
+        """
+        assignment = self.get_object()
+        assignment.is_unlinked_from_template = True
+        assignment.save(update_fields=['is_unlinked_from_template'])
+        serializer = self.get_serializer(assignment)
+        return Response(serializer.data)
 
 
 class AssignmentAttachmentViewSet(viewsets.ModelViewSet):

@@ -38,7 +38,39 @@ class SubjectGroup(models.Model):
 
 
 class CourseSection(models.Model):
-    subject_group = models.ForeignKey(SubjectGroup, on_delete=models.CASCADE, related_name="sections")
+    """
+    Course section can be:
+    - template section for a Course (course is set, subject_group is null)
+    - concrete section for a SubjectGroup (subject_group is set, course is null)
+    Concrete sections can optionally point to their template_section.
+    """
+
+    course = models.ForeignKey(
+        Course,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="template_sections",
+        help_text="Set for template sections that belong to a Course (not a specific SubjectGroup).",
+    )
+    subject_group = models.ForeignKey(
+        SubjectGroup,
+        on_delete=models.CASCADE,
+        related_name="sections",
+        null=True,
+        blank=True,
+        help_text="Set for concrete sections of a specific SubjectGroup.",
+    )
+    # Optional link to a template section this section was derived from
+    template_section = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="derived_sections",
+        help_text="Template section this section was derived from (if any).",
+    )
+
     title = models.CharField(max_length=255)
     is_general = models.BooleanField(default=False)
     position = models.PositiveIntegerField(default=0)
@@ -49,13 +81,20 @@ class CourseSection(models.Model):
         ordering = ["position", "id"]
 
     def __str__(self) -> str:
-        return f"{self.title} - {self.subject_group}"
+        if self.subject_group:
+            return f"{self.title} - {self.subject_group}"
+        if self.course:
+            return f"{self.title} - {self.course} (template)"
+        return self.title
 
     def save(self, *args, **kwargs):
-        # Auto-increment position within subject_group
+        # Auto-increment position within subject_group or course (for templates)
         if not self.position or self.position == 0:
-            siblings = CourseSection.objects.filter(subject_group=self.subject_group)
-            max_pos = siblings.aggregate(models.Max('position'))['position__max'] or 0
+            if self.subject_group:
+                siblings = CourseSection.objects.filter(subject_group=self.subject_group)
+            else:
+                siblings = CourseSection.objects.filter(course=self.course, subject_group__isnull=True)
+            max_pos = siblings.aggregate(models.Max("position"))["position__max"] or 0
             self.position = max_pos + 1
         super().save(*args, **kwargs)
 

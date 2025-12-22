@@ -19,12 +19,26 @@ class ResourceType(models.TextChoices):
 class Resource(models.Model):
     course_section = models.ForeignKey("courses.CourseSection", on_delete=models.CASCADE, related_name="resources")
     parent_resource = models.ForeignKey("self", on_delete=models.CASCADE, null=True, blank=True, related_name="children")
+    # Optional link to template resource from which this one was cloned
+    template_resource = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="derived_resources",
+        help_text="Template resource this resource was cloned from (if any).",
+    )
     type = models.CharField(max_length=32, choices=ResourceType.choices)
     title = models.CharField(max_length=255)
     description = models.TextField(null=True, blank=True)
     url = models.CharField(max_length=1024, null=True, blank=True)
     file = models.FileField(upload_to='resources/', null=True, blank=True)
     position = models.PositiveIntegerField(default=0)
+    # If true, this resource will no longer be auto-synced with its template
+    is_unlinked_from_template = models.BooleanField(
+        default=False,
+        help_text="If true, this resource is no longer auto-synced from its template.",
+    )
 
     class Meta:
         ordering = ["position", "id"]
@@ -60,12 +74,26 @@ class Resource(models.Model):
 
 class Assignment(models.Model):
     course_section = models.ForeignKey("courses.CourseSection", on_delete=models.CASCADE, related_name="assignments")
+    # Optional link to template assignment this one was cloned from
+    template_assignment = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="derived_assignments",
+        help_text="Template assignment this assignment was cloned from (if any).",
+    )
     teacher = models.ForeignKey("users.User", on_delete=models.CASCADE, related_name="assignments")
     title = models.CharField(max_length=255)
     description = models.TextField(null=True, blank=True)
     due_at = models.DateTimeField()
     max_grade = models.PositiveIntegerField(default=100, help_text="Maximum possible grade for this assignment")
     file = models.FileField(upload_to='assignments/', null=True, blank=True)
+    # If true, this assignment will no longer be auto-synced with its template
+    is_unlinked_from_template = models.BooleanField(
+        default=False,
+        help_text="If true, this assignment is no longer auto-synced from its template.",
+    )
 
     def __str__(self) -> str:
         return self.title

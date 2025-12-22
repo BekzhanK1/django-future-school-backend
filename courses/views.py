@@ -23,13 +23,135 @@ class CourseViewSet(viewsets.ModelViewSet):
     search_fields = ['course_code', 'name', 'description']
     ordering_fields = ['course_code', 'name', 'grade']
     ordering = ['course_code']
-    
+
     @action(detail=False, methods=['get'], url_path='full')
     def full(self, request):
         """Return all courses with their associated subject groups"""
         queryset = Course.objects.prefetch_related('subject_groups__classroom', 'subject_groups__teacher').all()
         serializer = CourseFullSerializer(queryset, many=True)
         return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='sync-content')
+    def sync_content(self, request, pk=None):
+        """
+        Sync template CourseSections, Resources, and Assignments from this Course
+        into all SubjectGroups of the course.
+
+        Usage:
+        - Prepare template sections for the Course (CourseSection with course set, subject_group null).
+        - Call POST /api/courses/{id}/sync-content/ to propagate content to all SubjectGroups.
+        """
+        from learning.models import Resource, Assignment, AssignmentAttachment
+
+        course = self.get_object()
+
+        # 1) Get template sections for this course (subject_group is null)
+        template_sections = CourseSection.objects.filter(
+            course=course,
+            subject_group__isnull=True,
+        ).order_by("position", "id")
+
+        if not template_sections.exists():
+            return Response(
+                {"detail": "No template sections found for this course."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 2) For each SubjectGroup of this course, ensure derived sections & content exist
+        subject_groups = course.subject_groups.all()
+
+        def clone_resource_tree(template_res: Resource, target_section: CourseSection, parent: Resource | None):
+            """
+            Recursively clone a template resource and its children into target_section.
+            """
+            # Check if a clone already exists for this template in this section
+            existing = Resource.objects.filter(
+                course_section=target_section,
+                template_resource=template_res,
+            ).first()
+            if existing:
+                return existing
+
+            clone = Resource.objects.create(
+                course_section=target_section,
+                parent_resource=parent,
+                template_resource=template_res,
+                type=template_res.type,
+                title=template_res.title,
+                description=template_res.description,
+                url=template_res.url,
+                file=template_res.file,
+                position=template_res.position,
+            )
+
+            # Clone children
+            for child in template_res.children.all().order_by("position", "id"):
+                clone_resource_tree(child, target_section, clone)
+
+            return clone
+
+        for sg in subject_groups:
+            # For each template section, ensure a derived section for this SubjectGroup exists
+            for tmpl_sec in template_sections:
+                derived_sec, created = CourseSection.objects.get_or_create(
+                    subject_group=sg,
+                    template_section=tmpl_sec,
+                    defaults={
+                        "course": None,
+                        "title": tmpl_sec.title,
+                        "is_general": tmpl_sec.is_general,
+                        "position": tmpl_sec.position,
+                        "start_date": tmpl_sec.start_date,
+                        "end_date": tmpl_sec.end_date,
+                    },
+                )
+
+                # Sync resources: clone missing template resources into derived section
+                tmpl_resources = Resource.objects.filter(
+                    course_section=tmpl_sec,
+                    parent_resource__isnull=True,
+                ).order_by("position", "id")
+
+                for tmpl_res in tmpl_resources:
+                    clone_resource_tree(tmpl_res, derived_sec, parent=None)
+
+                # Sync assignments: one-to-one mapping via template_assignment
+                tmpl_assignments = Assignment.objects.filter(course_section=tmpl_sec).order_by("due_at", "id")
+                for tmpl_asg in tmpl_assignments:
+                    if tmpl_asg.template_assignment_id:
+                        # already a clone of something else; skip
+                        continue
+                    derived_asg = Assignment.objects.filter(
+                        course_section=derived_sec,
+                        template_assignment=tmpl_asg,
+                    ).first()
+                    if not derived_asg:
+                        derived_asg = Assignment.objects.create(
+                            course_section=derived_sec,
+                            template_assignment=tmpl_asg,
+                            teacher=tmpl_asg.teacher,
+                            title=tmpl_asg.title,
+                            description=tmpl_asg.description,
+                            due_at=tmpl_asg.due_at,
+                            max_grade=tmpl_asg.max_grade,
+                            file=tmpl_asg.file,
+                        )
+                        # Clone attachments
+                        for att in tmpl_asg.attachments.all().order_by("position", "id"):
+                            AssignmentAttachment.objects.create(
+                                assignment=derived_asg,
+                                type=att.type,
+                                title=att.title,
+                                content=att.content,
+                                file_url=att.file_url,
+                                file=att.file,
+                                position=att.position,
+                            )
+
+        return Response(
+            {"detail": "Content synced to subject groups successfully."},
+            status=status.HTTP_200_OK,
+        )
 
 
 class SubjectGroupViewSet(viewsets.ModelViewSet):
