@@ -77,6 +77,24 @@ class CourseSection(models.Model):
     start_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
 
+    # Template-relative scheduling (used only when this is a template section for a Course)
+    template_week_index = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Week index in the academic year (0 = first week). "
+                  "Used to calculate start_date relative to academic_start_date.",
+    )
+    template_start_offset_days = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Alternative to week index: offset in days from academic_start_date.",
+    )
+    template_duration_days = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Duration of the section in days (e.g. 7 for a week).",
+    )
+
     class Meta:
         ordering = ["position", "id"]
 

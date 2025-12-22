@@ -41,9 +41,38 @@ class CourseViewSet(viewsets.ModelViewSet):
         - Prepare template sections for the Course (CourseSection with course set, subject_group null).
         - Call POST /api/courses/{id}/sync-content/ to propagate content to all SubjectGroups.
         """
+        from datetime import date, timedelta, datetime
+        from django.utils import timezone
         from learning.models import Resource, Assignment, AssignmentAttachment
 
         course = self.get_object()
+
+        # Academic year start date: can be provided explicitly or inferred
+        academic_start_str = request.data.get("academic_start_date")
+
+        def infer_academic_start(today: date) -> date:
+            """
+            Infer academic year start date if not explicitly provided.
+            Simplest rule: Sep 1 of the academic year that contains 'today'
+            (Sep 1..Dec 31 belong to this year, Jan 1..Aug 31 belong to previous).
+            """
+            if today.month >= 9:
+                year = today.year
+            else:
+                year = today.year - 1
+            return date(year, 9, 1)
+
+        today = timezone.now().date()
+        if academic_start_str:
+            try:
+                academic_start_date = date.fromisoformat(academic_start_str)
+            except ValueError:
+                return Response(
+                    {"detail": "Invalid academic_start_date, expected YYYY-MM-DD"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        else:
+            academic_start_date = infer_academic_start(today)
 
         # 1) Get template sections for this course (subject_group is null)
         template_sections = CourseSection.objects.filter(
@@ -101,10 +130,36 @@ class CourseViewSet(viewsets.ModelViewSet):
                         "title": tmpl_sec.title,
                         "is_general": tmpl_sec.is_general,
                         "position": tmpl_sec.position,
-                        "start_date": tmpl_sec.start_date,
-                        "end_date": tmpl_sec.end_date,
+                        # start_date/end_date will be computed below
                     },
                 )
+
+                # Compute concrete section dates based on template-relative fields
+                if derived_sec.start_date is None or created:
+                    # Determine offset in days from academic_start_date
+                    offset_days = None
+                    if tmpl_sec.template_start_offset_days is not None:
+                        offset_days = tmpl_sec.template_start_offset_days
+                    elif tmpl_sec.template_week_index is not None:
+                        offset_days = tmpl_sec.template_week_index * 7
+
+                    if offset_days is not None:
+                        start_date = academic_start_date + timedelta(days=offset_days)
+                        duration = tmpl_sec.template_duration_days
+                        if not duration and tmpl_sec.start_date and tmpl_sec.end_date:
+                            duration = (tmpl_sec.end_date - tmpl_sec.start_date).days + 1
+                        if not duration:
+                            duration = 7
+                        end_date = start_date + timedelta(days=duration - 1)
+                        derived_sec.start_date = start_date
+                        derived_sec.end_date = end_date
+                        derived_sec.save(update_fields=["start_date", "end_date"])
+                    else:
+                        # Fallback: copy absolute dates if template-relative data is missing
+                        if tmpl_sec.start_date and tmpl_sec.end_date:
+                            derived_sec.start_date = tmpl_sec.start_date
+                            derived_sec.end_date = tmpl_sec.end_date
+                            derived_sec.save(update_fields=["start_date", "end_date"])
 
                 # Sync resources: clone missing template resources into derived section
                 tmpl_resources = Resource.objects.filter(
@@ -126,13 +181,29 @@ class CourseViewSet(viewsets.ModelViewSet):
                         template_assignment=tmpl_asg,
                     ).first()
                     if not derived_asg:
+                        # Calculate due_at based on template-relative fields if available
+                        due_at = tmpl_asg.due_at
+                        if (
+                            derived_sec.start_date
+                            and tmpl_asg.template_offset_days_from_section_start is not None
+                            and tmpl_asg.template_due_time is not None
+                        ):
+                            due_date = derived_sec.start_date + timedelta(
+                                days=tmpl_asg.template_offset_days_from_section_start
+                            )
+                            due_at = datetime.combine(
+                                due_date,
+                                tmpl_asg.template_due_time,
+                                tzinfo=timezone.get_current_timezone(),
+                            )
+
                         derived_asg = Assignment.objects.create(
                             course_section=derived_sec,
                             template_assignment=tmpl_asg,
                             teacher=tmpl_asg.teacher,
                             title=tmpl_asg.title,
                             description=tmpl_asg.description,
-                            due_at=tmpl_asg.due_at,
+                            due_at=due_at,
                             max_grade=tmpl_asg.max_grade,
                             file=tmpl_asg.file,
                         )

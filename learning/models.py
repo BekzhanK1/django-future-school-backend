@@ -87,6 +87,17 @@ class Assignment(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField(null=True, blank=True)
     due_at = models.DateTimeField()
+    # Template-relative scheduling: offset from section.start_date + time of day
+    template_offset_days_from_section_start = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Offset in days from section start date to assignment due date (for templates).",
+    )
+    template_due_time = models.TimeField(
+        null=True,
+        blank=True,
+        help_text="Time of day for assignment due datetime (for templates).",
+    )
     max_grade = models.PositiveIntegerField(default=100, help_text="Maximum possible grade for this assignment")
     file = models.FileField(upload_to='assignments/', null=True, blank=True)
     # If true, this assignment will no longer be auto-synced with its template

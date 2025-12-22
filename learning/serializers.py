@@ -77,10 +77,15 @@ class AssignmentSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Assignment
-        fields = ['id', 'course_section', 'teacher', 'title', 'description', 'due_at', 'max_grade', 'file',
-                 'course_section_title', 'subject_group_course_name', 'subject_group_course_code', 
-                 'teacher_username', 'teacher_fullname', 'submission_count', 'attachments', 'classroom',
-                 'is_available', 'is_deadline_passed', 'is_submitted', 'student_submission', 'all_submissions']
+        fields = [
+            'id', 'course_section', 'teacher', 'title', 'description',
+            'due_at', 'max_grade', 'file',
+            # Template-relative scheduling fields (used primarily for template sections)
+            'template_offset_days_from_section_start', 'template_due_time',
+            'course_section_title', 'subject_group_course_name', 'subject_group_course_code',
+            'teacher_username', 'teacher_fullname', 'submission_count', 'attachments', 'classroom',
+            'is_available', 'is_deadline_passed', 'is_submitted', 'student_submission', 'all_submissions',
+        ]
     
 
     def get_classroom(self, obj):

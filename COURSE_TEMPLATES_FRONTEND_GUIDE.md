@@ -47,9 +47,14 @@ Content-Type: application/json
 
 ---
 
-### Шаг 2: Создание шаблонных секций для курса
+### Шаг 2: Создание шаблонных секций для курса (без привязки к году)
 
-Создай секции курса (шаблоны). **Важно:** `subject_group` должен быть `null`, а `course` — ID созданного курса.
+Создай секции курса (шаблоны). **Важно:** `subject_group` должен быть `null`, а `course` — ID созданного курса.  
+Для шаблонов мы задаём **относительные даты**, а не конкретный год:
+
+- `template_week_index` — номер недели учебного года (0 = первая неделя),
+- `template_start_offset_days` — альтернатива: смещение в днях от `academic_start_date`,
+- `template_duration_days` — длительность секции в днях (обычно 7).
 
 ```http
 POST /api/course-sections/
@@ -61,13 +66,13 @@ Content-Type: application/json
   "subject_group": null,
   "title": "Неделя 1: Сложение и вычитание",
   "position": 1,
-  "start_date": "2024-09-01",
-  "end_date": "2024-09-07",
-  "is_general": false
+  "is_general": false,
+  "template_week_index": 0,          // первая неделя учебного года
+  "template_duration_days": 7        // секция длится 7 дней
 }
 ```
 
-**Ответ:**
+**Ответ (упрощённо):**
 ```json
 {
   "id": 10,
@@ -76,24 +81,31 @@ Content-Type: application/json
   "template_section": null,
   "title": "Неделя 1: Сложение и вычитание",
   "position": 1,
-  "start_date": "2024-09-01",
-  "end_date": "2024-09-07",
+  "start_date": null,
+  "end_date": null,
+  "template_week_index": 0,
+  "template_start_offset_days": null,
+  "template_duration_days": 7,
   "is_general": false,
   "resources": [],
   "assignments": []
 }
 ```
 
-**Создай несколько секций:**
+**Пример секции через смещение от начала года (альтернатива):**
 ```http
 POST /api/course-sections/
+Authorization: Bearer <superadmin_token>
+Content-Type: application/json
+
 {
   "course": 1,
   "subject_group": null,
-  "title": "Неделя 2: Умножение",
-  "position": 2,
-  "start_date": "2024-09-08",
-  "end_date": "2024-09-14"
+  "title": "Повторение перед контрольной",
+  "position": 3,
+  "is_general": false,
+  "template_start_offset_days": 60,  // через 60 дней после начала учебного года
+  "template_duration_days": 3
 }
 ```
 
@@ -161,9 +173,14 @@ Content-Type: application/json
 
 ---
 
-### Шаг 4: Создание заданий в шаблонных секциях
+### Шаг 4: Создание заданий в шаблонных секциях (относительные даты)
 
-Добавь задания в шаблонные секции:
+Добавь задания в шаблонные секции. Для шаблонов лучше использовать **относительные** поля:
+
+- `template_offset_days_from_section_start` — через сколько дней от `section.start_date` дедлайн,
+- `template_due_time` — время суток дедлайна (например, `23:59:00`).
+
+При синхронизации бэкенд сам посчитает `due_at` в нужном году.
 
 ```http
 POST /api/assignments/
@@ -171,11 +188,12 @@ Authorization: Bearer <superadmin_token>
 Content-Type: application/json
 
 {
-  "course_section": 10,
+  "course_section": 10,                     // шаблонная секция курса
   "teacher": 5,
   "title": "Домашнее задание: Сложение до 10",
   "description": "Решите примеры на сложение",
-  "due_at": "2024-09-07T23:59:00Z",
+  "template_offset_days_from_section_start": 6,   // через 6 дней от начала секции
+  "template_due_time": "23:59:00",               // дедлайн в 23:59
   "max_grade": 100,
   "attachments": [
     {
@@ -193,6 +211,8 @@ Content-Type: application/json
   ]
 }
 ```
+
+> Для существующей логики `due_at` тоже поддерживается. Если заданы шаблонные поля `template_offset_days_from_section_start` и `template_due_time`, при синхронизации они имеют приоритет и `due_at` считается автоматически.
 
 ---
 
@@ -223,14 +243,23 @@ Content-Type: application/json
 }
 ```
 
-#### 5.2. Синхронизируй контент из курса в SubjectGroup
+#### 5.2. Синхронизируй контент из курса в SubjectGroup (с учётом учебного года)
 
-**Это ключевой эндпоинт!** Он копирует все шаблонные секции, ресурсы и задания во все SubjectGroup'ы данного курса.
+**Это ключевой эндпоинт!** Он копирует все шаблонные секции, ресурсы и задания во все SubjectGroup'ы данного курса **и автоматически рассчитывает реальные даты** на основе начала учебного года.
 
 ```http
 POST /api/courses/1/sync-content/
 Authorization: Bearer <superadmin_token>
+Content-Type: application/json
+
+{
+  "academic_start_date": "2026-09-01"   // дата начала учебного года (опционально, но рекомендуется)
+}
 ```
+
+Если `academic_start_date` не передан, бэкенд сам возьмёт:
+- 1 сентября текущего академического года  
+  (Sep–Dec → этого года, Jan–Aug → предыдущего).
 
 **Ответ:**
 ```json
@@ -240,10 +269,18 @@ Authorization: Bearer <superadmin_token>
 ```
 
 **Что происходит:**
-- Для каждой шаблонной секции курса создаётся дочерняя секция в каждом SubjectGroup
-- Все ресурсы (включая вложенные директории) копируются рекурсивно
-- Все задания и их вложения копируются
-- Каждая копия помнит связь с шаблоном через `template_section`, `template_resource`, `template_assignment`
+- Для каждой шаблонной секции курса создаётся дочерняя секция в каждом SubjectGroup.
+- Для каждой шаблонной секции считаются реальные даты:
+  - Находится `offset_days` из `template_start_offset_days` или `template_week_index * 7`.
+  - `start_date = academic_start_date + offset_days`.
+  - `end_date = start_date + (template_duration_days - 1)` (или 7 по умолчанию).
+- Все ресурсы (включая вложенные директории) копируются рекурсивно.
+- Все задания и их вложения копируются:
+  - Если у шаблонного задания заданы `template_offset_days_from_section_start` и `template_due_time`, то:
+    - `due_date = derived_section.start_date + template_offset_days_from_section_start`.
+    - `due_at = due_date + template_due_time` (с таймзоной сервера).
+  - Если шаблонные поля не заданы — `due_at` просто копируется.
+- Каждая копия помнит связь с шаблоном через `template_section`, `template_resource`, `template_assignment`.
 
 ---
 
@@ -256,7 +293,7 @@ GET /api/course-sections/?subject_group=20
 Authorization: Bearer <token>
 ```
 
-**Ответ:**
+**Ответ (упрощённо):**
 ```json
 [
   {
@@ -266,6 +303,8 @@ Authorization: Bearer <token>
     "template_section": 10,
     "title": "Неделя 1: Сложение и вычитание",
     "position": 1,
+    "start_date": "2026-09-01",
+    "end_date": "2026-09-07",
     "resources": [
       {
         "id": 40,
@@ -281,6 +320,7 @@ Authorization: Bearer <token>
         "id": 50,
         "template_assignment": 25,
         "title": "Домашнее задание: Сложение до 10",
+        "due_at": "2026-09-07T23:59:00Z",
         "is_unlinked_from_template": false,
         ...
       }
@@ -364,7 +404,7 @@ Authorization: Bearer <teacher_token>
 | `POST` | `/api/courses/` | Создать курс | SuperAdmin |
 | `GET` | `/api/courses/` | Список курсов | SuperAdmin |
 | `GET` | `/api/courses/{id}/` | Детали курса | SuperAdmin |
-| `POST` | `/api/courses/{id}/sync-content/` | **Синхронизировать контент** | SuperAdmin |
+| `POST` | `/api/courses/{id}/sync-content/` | **Синхронизировать контент (с учётом учебного года)** | SuperAdmin |
 
 ### Секции курса
 
@@ -380,7 +420,8 @@ Authorization: Bearer <teacher_token>
   "course": 1,           // ID курса
   "subject_group": null, // ОБЯЗАТЕЛЬНО null для шаблона!
   "title": "...",
-  ...
+  "template_week_index": 0,              // или template_start_offset_days
+  "template_duration_days": 7
 }
 ```
 
@@ -409,6 +450,18 @@ Authorization: Bearer <teacher_token>
 | `POST` | `/api/assignments/` | Создать задание | RoleBased |
 | `GET` | `/api/assignments/?course_section={id}` | Задания секции | RoleBased |
 | `POST` | `/api/assignments/{id}/unlink-from-template/` | **Отвязать от шаблона** | RoleBased |
+
+При создании **шаблонного задания** рекомендуется использовать поля:
+
+```json
+{
+  "course_section": 10,
+  "title": "...",
+  "template_offset_days_from_section_start": 3,
+  "template_due_time": "23:59:00",
+  ...
+}
+```
 
 ---
 
@@ -502,9 +555,13 @@ const derivedSections = await fetch(`/api/course-sections/?subject_group=${subje
 
 ### 2. Синхронизация
 
-- Синхронизация **не удаляет** существующие дочерние элементы
-- Синхронизация **добавляет только новые** элементы из шаблона
-- Если элемент уже существует (по `template_resource`/`template_assignment`), он не дублируется
+- Синхронизация **не удаляет** существующие дочерние элементы.
+- Синхронизация **добавляет только новые** элементы из шаблона.
+- Если элемент уже существует (по `template_resource`/`template_assignment`), он не дублируется.
+- Для секций при синхронизации:
+  - `start_date`/`end_date` пересчитываются относительно `academic_start_date` и шаблонных полей.
+- Для заданий при синхронизации:
+  - `due_at` пересчитывается из `template_offset_days_from_section_start` + `template_due_time`, если они заданы.
 
 ### 3. Отвязка от шаблона
 

@@ -42,7 +42,25 @@ class CourseSectionSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = CourseSection
-        fields = ['id', 'subject_group', 'title', 'position',  'is_current' ,'is_general', 'start_date', 'end_date', 'resources', 'assignments', 'tests']
+        fields = [
+            'id',
+            'course',
+            'subject_group',
+            'template_section',
+            'title',
+            'position',
+            'is_current',
+            'is_general',
+            'start_date',
+            'end_date',
+            # Template-relative scheduling fields (meaningful for template sections)
+            'template_week_index',
+            'template_start_offset_days',
+            'template_duration_days',
+            'resources',
+            'assignments',
+            'tests',
+        ]
     
     def get_resources(self, obj):
         from learning.serializers import ResourceTreeSerializer
