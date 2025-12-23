@@ -2,6 +2,7 @@ from rest_framework import serializers
 from django.utils import timezone
 from .models import Test, Question, Option, Attempt, Answer, QuestionType
 from courses.models import CourseSection, SubjectGroup
+from users.models import UserRole
 
 
 class OptionSerializer(serializers.ModelSerializer):
@@ -92,8 +93,19 @@ class TestSerializer(serializers.ModelSerializer):
         return True
 
     def get_can_see_results(self, obj):
-        if not obj.reveal_results_at:
+        """
+        Determine if, in principle, results for this test can be visible to students.
+
+        Rules:
+        - If `show_score_immediately` is True, results can be seen right after completion.
+        - Otherwise, results are only visible when `reveal_results_at` is set and
+          the current time has passed it (including when teacher presses open-to-review,
+          which sets `reveal_results_at=now`).
+        """
+        if getattr(obj, "show_score_immediately", False):
             return True
+        if not obj.reveal_results_at:
+            return False
         return obj.reveal_results_at <= timezone.now()
 
     def get_can_attempt(self, obj):
@@ -202,8 +214,39 @@ class AttemptSerializer(serializers.ModelSerializer):
                             'score', 'max_score', 'percentage', 'is_completed', 'is_graded', 'results_viewed_at']
 
     def get_answers(self, obj):
+        """
+        Return serialized answers for this attempt.
+
+        For students, answers are only visible when `can_view_results` is True.
+        Teachers and admins can always see answers.
+        """
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+
+        # If the current user is the student and results are not yet available, hide answers
+        if user and getattr(user, "role", None) == UserRole.STUDENT and not obj.can_view_results:
+            return []
+
         answers = obj.answers.all().order_by('question__position')
         return AnswerSerializer(answers, many=True, context=self.context).data
+
+    def to_representation(self, instance):
+        """
+        Hide score-related fields for students until results are available.
+        """
+        data = super().to_representation(instance)
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+
+        if user and getattr(user, "role", None) == UserRole.STUDENT and not instance.can_view_results:
+            # Keep meta (timestamps, status) but hide evaluation details
+            data['score'] = None
+            data['max_score'] = None
+            data['percentage'] = None
+            # answers are already hidden via get_answers, but ensure consistency
+            data['answers'] = []
+
+        return data
 
 
 class AnswerSerializer(serializers.ModelSerializer):

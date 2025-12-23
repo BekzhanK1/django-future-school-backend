@@ -134,10 +134,28 @@ class Attempt(models.Model):
 
     @property
     def can_view_results(self):
+        """
+        Determine if the student is allowed to view results for this attempt.
+
+        Rules:
+        - Results are NEVER visible while the attempt is not completed.
+        - If the test has `show_score_immediately=True`, results are visible
+          as soon as the attempt is completed.
+        - Otherwise, results are visible only when `reveal_results_at` is set
+          and the current time is past that moment (including when the teacher
+          presses the "open-to-review" button which sets `reveal_results_at=now`).
+        """
         if not self.is_completed:
             return False
-        if not self.test.reveal_results_at:
+
+        # If teacher configured immediate score visibility, allow right away
+        if getattr(self.test, "show_score_immediately", False):
             return True
+
+        # Otherwise respect reveal_results_at; if it's not set, keep results hidden
+        if not self.test.reveal_results_at:
+            return False
+
         from django.utils import timezone
         return timezone.now() >= self.test.reveal_results_at
 
