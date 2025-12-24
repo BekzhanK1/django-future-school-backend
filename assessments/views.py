@@ -151,6 +151,46 @@ class TestViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(test)
         return Response(serializer.data)
 
+    @extend_schema(
+        operation_id='tests_close_to_review',
+        summary='Close test results from students review',
+        request=None,
+        responses={200: TestSerializer, 403: OpenApiTypes.OBJECT},
+        tags=['Tests']
+    )
+    @action(detail=True, methods=['post'], url_path='close-to-review')
+    def close_to_review(self, request, pk=None):
+        """
+        Hide test results from students by setting `reveal_results_at` to None.
+
+        This makes:
+        - `TestSerializer.can_see_results` become False
+        - `Attempt.can_view_results` start returning False for completed attempts.
+
+        Intended to be used as a teacher "Close to review" button.
+        """
+        test = self.get_object()
+
+        # Only the test teacher can close results for review
+        if request.user != test.teacher:
+            return Response(
+                {'error': 'You can only close results for your own tests'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Only allow closing if test doesn't have show_score_immediately=True
+        if getattr(test, 'show_score_immediately', False):
+            return Response(
+                {'error': 'Cannot close results for tests with immediate score visibility'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        test.reveal_results_at = None
+        test.save(update_fields=['reveal_results_at'])
+
+        serializer = self.get_serializer(test)
+        return Response(serializer.data)
+
     @action(detail=False, methods=['post'], url_path='create-full')
     def create_full(self, request):
         """Create a test and its questions in a single request.
@@ -226,13 +266,27 @@ class TestViewSet(viewsets.ModelViewSet):
         # Build per-question view
         questions_data = self._build_per_question_view(attempts, questions)
 
+        from django.utils import timezone
+        from .serializers import TestSerializer
+        
+        # Get test serializer to include computed fields like can_see_results
+        test_serializer = TestSerializer(test, context={'request': self.request})
+        
+        # Determine if test is opened to review
+        # Test is opened if reveal_results_at is set (not None)
+        is_opened_to_review = test.reveal_results_at is not None
+        
         return {
             'test': {
                 'id': test.id,
                 'title': test.title,
                 'total_points': test.total_points,
                 'total_questions': questions.count(),
-                'total_students': attempts.count()
+                'total_students': attempts.count(),
+                'can_see_results': test_serializer.data.get('can_see_results', False),
+                'reveal_results_at': test.reveal_results_at.isoformat() if test.reveal_results_at else None,
+                'show_score_immediately': getattr(test, 'show_score_immediately', False),
+                'is_opened_to_review': is_opened_to_review
             },
             'per_student_view': students_data,
             'per_question_view': questions_data
