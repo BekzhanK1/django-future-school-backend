@@ -88,6 +88,12 @@ class CourseViewSet(viewsets.ModelViewSet):
 
         # 2) For each SubjectGroup of this course, ensure derived sections & content exist
         subject_groups = course.subject_groups.all()
+        
+        if not subject_groups.exists():
+            return Response(
+                {"detail": "No subject groups found for this course. Please create at least one subject group before syncing."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         def clone_resource_tree(template_res: Resource, target_section: CourseSection, parent: Resource | None):
             """
@@ -219,8 +225,23 @@ class CourseViewSet(viewsets.ModelViewSet):
                                 position=att.position,
                             )
 
+        # Count what was synced
+        total_sections = sum(1 for sg in subject_groups for _ in template_sections)
+        total_resources = sum(
+            len(Resource.objects.filter(course_section=tmpl_sec, parent_resource__isnull=True))
+            for tmpl_sec in template_sections
+        )
+        total_assignments = sum(
+            len(Assignment.objects.filter(course_section=tmpl_sec, template_assignment__isnull=True))
+            for tmpl_sec in template_sections
+        )
+        
         return Response(
-            {"detail": "Content synced to subject groups successfully."},
+            {
+                "detail": f"Content synced successfully to {len(subject_groups)} subject group(s). "
+                         f"Created {total_sections} section(s), synced {total_resources} resource(s), "
+                         f"and {total_assignments} assignment(s)."
+            },
             status=status.HTTP_200_OK,
         )
 
@@ -325,7 +346,7 @@ class CourseSectionViewSet(viewsets.ModelViewSet):
     serializer_class = CourseSectionSerializer
     permission_classes = [RoleBasedPermission]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['subject_group']
+    filterset_fields = ['subject_group', 'course']
     search_fields = ['title']
     ordering_fields = ['position', 'title']
     ordering = ['position', 'id']
@@ -334,17 +355,53 @@ class CourseSectionViewSet(viewsets.ModelViewSet):
         queryset = super().get_queryset()
         user = self.request.user
         
-        # Students can only see course sections from their enrolled classrooms
-        if user.role == UserRole.STUDENT:
-            student_classrooms = user.classroom_users.values_list('classroom', flat=True)
-            queryset = queryset.filter(subject_group__classroom__in=student_classrooms)
-        # Teachers can see course sections from their subject groups
-        elif user.role == UserRole.TEACHER:
-            queryset = queryset.filter(subject_group__teacher=user)
-        # School admins can see course sections from their school
-        elif user.role == UserRole.SCHOOLADMIN:
-            queryset = queryset.filter(subject_group__classroom__school=user.school)
-        # Superadmins can see all course sections (default queryset)
+        # Check if filtering by course (template sections)
+        course_id = self.request.query_params.get('course')
+        subject_group_id = self.request.query_params.get('subject_group')
+        
+        # If filtering by course, these are template sections - only superadmins can see them
+        if course_id:
+            if user.role == UserRole.SUPERADMIN:
+                # Superadmins can see all template sections for this course
+                # DjangoFilterBackend will apply the course filter, we just need to ensure subject_group is null
+                queryset = queryset.filter(subject_group__isnull=True)
+            else:
+                # Other roles cannot see template sections
+                return queryset.none()
+        # If filtering by subject_group, these are regular sections - apply role-based filtering
+        elif subject_group_id:
+            # Students can only see course sections from their enrolled classrooms
+            # IMPORTANT: Students should NOT see template sections (where subject_group is null)
+            if user.role == UserRole.STUDENT:
+                student_classrooms = user.classroom_users.values_list('classroom', flat=True)
+                queryset = queryset.filter(
+                    subject_group__classroom__in=student_classrooms,
+                    subject_group__isnull=False  # Exclude template sections
+                )
+            # Teachers can see course sections from their subject groups
+            elif user.role == UserRole.TEACHER:
+                queryset = queryset.filter(subject_group__teacher=user)
+            # School admins can see course sections from their school
+            elif user.role == UserRole.SCHOOLADMIN:
+                queryset = queryset.filter(subject_group__classroom__school=user.school)
+            # Superadmins can see all course sections (default queryset)
+        else:
+            # No filters - apply role-based filtering for all sections
+            # Students can only see course sections from their enrolled classrooms
+            # IMPORTANT: Students should NOT see template sections (where subject_group is null)
+            if user.role == UserRole.STUDENT:
+                student_classrooms = user.classroom_users.values_list('classroom', flat=True)
+                queryset = queryset.filter(
+                    subject_group__classroom__in=student_classrooms,
+                    subject_group__isnull=False  # Exclude template sections
+                )
+            # Teachers can see course sections from their subject groups
+            elif user.role == UserRole.TEACHER:
+                queryset = queryset.filter(subject_group__teacher=user)
+            # School admins can see course sections from their school
+            elif user.role == UserRole.SCHOOLADMIN:
+                queryset = queryset.filter(subject_group__classroom__school=user.school)
+            # Superadmins can see all course sections (default queryset)
         
         return queryset
 

@@ -72,7 +72,11 @@ class ResourceViewSet(viewsets.ModelViewSet):
             # Get student's classrooms
             student_classrooms = user.classroom_users.values_list('classroom', flat=True)
             # Filter resources that belong to course sections in the student's classrooms
-            queryset = queryset.filter(course_section__subject_group__classroom__in=student_classrooms)
+            # IMPORTANT: Students should NOT see template sections (where subject_group is null)
+            queryset = queryset.filter(
+                course_section__subject_group__classroom__in=student_classrooms,
+                course_section__subject_group__isnull=False  # Exclude template sections
+            )
         # Teachers can see resources for their subject groups
         elif user.role == UserRole.TEACHER:
             queryset = queryset.filter(course_section__subject_group__teacher=user)
@@ -86,17 +90,6 @@ class ResourceViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(parent_resource__isnull=True)
         
         return queryset
-
-    @action(detail=True, methods=['post'], url_path='unlink-from-template')
-    def unlink_from_template(self, request, pk=None):
-        """
-        Unlink this resource from its template so it will no longer be auto-synced.
-        """
-        resource = self.get_object()
-        resource.is_unlinked_from_template = True
-        resource.save(update_fields=['is_unlinked_from_template'])
-        serializer = self.get_serializer(resource)
-        return Response(serializer.data)
 
     @action(detail=False, methods=['patch'], url_path='change-items-order')
     def change_items_order(self, request):
@@ -404,8 +397,13 @@ class AssignmentViewSet(viewsets.ModelViewSet):
         
         # Students can only see assignments for their courses
         if user.role == UserRole.STUDENT:
-            student_courses = user.classroom_users.values_list('classroom__subject_groups__course', flat=True)
-            queryset = queryset.filter(course_section__subject_group__course__in=student_courses)
+            student_classrooms = user.classroom_users.values_list('classroom', flat=True)
+            # Filter assignments that belong to course sections in the student's classrooms
+            # IMPORTANT: Students should NOT see template sections (where subject_group is null)
+            queryset = queryset.filter(
+                course_section__subject_group__classroom__in=student_classrooms,
+                course_section__subject_group__isnull=False  # Exclude template sections
+            )
         # Teachers can see assignments they created
         elif user.role == UserRole.TEACHER:
             queryset = queryset.filter(teacher=user)
@@ -429,17 +427,6 @@ class AssignmentViewSet(viewsets.ModelViewSet):
             permission_classes = [RoleBasedPermission]
         
         return [permission() for permission in permission_classes]
-
-    @action(detail=True, methods=['post'], url_path='unlink-from-template')
-    def unlink_from_template(self, request, pk=None):
-        """
-        Unlink this assignment from its template so it will no longer be auto-synced.
-        """
-        assignment = self.get_object()
-        assignment.is_unlinked_from_template = True
-        assignment.save(update_fields=['is_unlinked_from_template'])
-        serializer = self.get_serializer(assignment)
-        return Response(serializer.data)
 
 
 class AssignmentAttachmentViewSet(viewsets.ModelViewSet):

@@ -66,17 +66,21 @@ class CourseSectionSerializer(serializers.ModelSerializer):
         from learning.serializers import ResourceTreeSerializer
         from users.models import UserRole
         
-        # Get root resources (no parent) for this section
-        root_resources = obj.resources.filter(parent_resource__isnull=True).order_by('position', 'id')
-        
-        # Apply permission filtering if user is in context
+        # IMPORTANT: Students should NOT see template sections (where subject_group is null)
         request = self.context.get('request')
         if request and request.user.is_authenticated:
             user = request.user
             if user.role == UserRole.STUDENT:
-                # Filter resources based on student's classroom enrollment
+                # If this is a template section (subject_group is null), return empty list
+                if obj.subject_group is None:
+                    return []
+                # Verify student is enrolled in the classroom of this section
                 student_classrooms = user.classroom_users.values_list('classroom', flat=True)
-                root_resources = root_resources.filter(course_section__subject_group__classroom__in=student_classrooms)
+                if obj.subject_group.classroom_id not in student_classrooms:
+                    return []
+        
+        # Get root resources (no parent) for this section
+        root_resources = obj.resources.filter(parent_resource__isnull=True).order_by('position', 'id')
         
         return ResourceTreeSerializer(root_resources, many=True, context=self.context).data
 
@@ -91,11 +95,42 @@ class CourseSectionSerializer(serializers.ModelSerializer):
     
     def get_assignments(self, obj):
         from learning.serializers import AssignmentSerializer
+        from users.models import UserRole
+        
+        # IMPORTANT: Students should NOT see template sections (where subject_group is null)
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            user = request.user
+            if user.role == UserRole.STUDENT:
+                # If this is a template section (subject_group is null), return empty list
+                if obj.subject_group is None:
+                    return []
+                # Verify student is enrolled in the classroom of this section
+                student_classrooms = user.classroom_users.values_list('classroom', flat=True)
+                if obj.subject_group.classroom_id not in student_classrooms:
+                    return []
+        
         assignments = obj.assignments.all().order_by('due_at')
+        
         return AssignmentSerializer(assignments, many=True, context=self.context).data
 
     def get_tests(self, obj):
         from assessments.serializers import TestSerializer
+        from users.models import UserRole
+        
+        # IMPORTANT: Students should NOT see template sections (where subject_group is null)
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            user = request.user
+            if user.role == UserRole.STUDENT:
+                # If this is a template section (subject_group is null), return empty list
+                if obj.subject_group is None:
+                    return []
+                # Verify student is enrolled in the classroom of this section
+                student_classrooms = user.classroom_users.values_list('classroom', flat=True)
+                if obj.subject_group.classroom_id not in student_classrooms:
+                    return []
+        
         tests = obj.tests.all().order_by('start_date', 'id')
         return TestSerializer(tests, many=True, context=self.context).data
 

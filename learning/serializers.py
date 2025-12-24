@@ -10,7 +10,8 @@ class ResourceSerializer(serializers.ModelSerializer):
     class Meta:
         model = Resource
         fields = ['id', 'course_section', 'parent_resource', 'parent_title', 'type', 
-                 'title', 'description', 'url', 'file', 'position', 'children']
+                 'title', 'description', 'url', 'file', 'position', 'children',
+                 'template_resource', 'is_unlinked_from_template']
     
     def get_children(self, obj):
         children = obj.children.all().order_by('position', 'id')
@@ -24,7 +25,8 @@ class ResourceTreeSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Resource
-        fields = ['id', 'type', 'title', 'description', 'url', 'file', 'position', 'children', 'level']
+        fields = ['id', 'type', 'title', 'description', 'url', 'file', 'position', 'children', 'level',
+                 'template_resource', 'is_unlinked_from_template']
     
     def get_children(self, obj):
         children = obj.children.all().order_by('position', 'id')
@@ -82,6 +84,8 @@ class AssignmentSerializer(serializers.ModelSerializer):
             'due_at', 'max_grade', 'file',
             # Template-relative scheduling fields (used primarily for template sections)
             'template_offset_days_from_section_start', 'template_due_time',
+            # Template link fields
+            'template_assignment', 'is_unlinked_from_template',
             'course_section_title', 'subject_group_course_name', 'subject_group_course_code',
             'teacher_username', 'teacher_fullname', 'submission_count', 'attachments', 'classroom',
             'is_available', 'is_deadline_passed', 'is_submitted', 'student_submission', 'all_submissions',
