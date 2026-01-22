@@ -27,7 +27,8 @@ class CourseViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='full')
     def full(self, request):
         """Return all courses with their associated subject groups"""
-        queryset = Course.objects.prefetch_related('subject_groups__classroom', 'subject_groups__teacher').all()
+        queryset = Course.objects.prefetch_related(
+            'subject_groups__classroom', 'subject_groups__teacher').all()
         serializer = CourseFullSerializer(queryset, many=True)
         return Response(serializer.data)
 
@@ -88,7 +89,7 @@ class CourseViewSet(viewsets.ModelViewSet):
 
         # 2) For each SubjectGroup of this course, ensure derived sections & content exist
         subject_groups = course.subject_groups.all()
-        
+
         if not subject_groups.exists():
             return Response(
                 {"detail": "No subject groups found for this course. Please create at least one subject group before syncing."},
@@ -134,7 +135,7 @@ class CourseViewSet(viewsets.ModelViewSet):
                 template_section__isnull=True,
                 course__isnull=True
             ).delete()
-            
+
             # For each template section, ensure a derived section for this SubjectGroup exists
             for tmpl_sec in template_sections:
                 derived_sec, created = CourseSection.objects.get_or_create(
@@ -159,22 +160,26 @@ class CourseViewSet(viewsets.ModelViewSet):
                         offset_days = tmpl_sec.template_week_index * 7
 
                     if offset_days is not None:
-                        start_date = academic_start_date + timedelta(days=offset_days)
+                        start_date = academic_start_date + \
+                            timedelta(days=offset_days)
                         duration = tmpl_sec.template_duration_days
                         if not duration and tmpl_sec.start_date and tmpl_sec.end_date:
-                            duration = (tmpl_sec.end_date - tmpl_sec.start_date).days + 1
+                            duration = (tmpl_sec.end_date -
+                                        tmpl_sec.start_date).days + 1
                         if not duration:
                             duration = 7
                         end_date = start_date + timedelta(days=duration - 1)
                         derived_sec.start_date = start_date
                         derived_sec.end_date = end_date
-                        derived_sec.save(update_fields=["start_date", "end_date"])
+                        derived_sec.save(
+                            update_fields=["start_date", "end_date"])
                     else:
                         # Fallback: copy absolute dates if template-relative data is missing
                         if tmpl_sec.start_date and tmpl_sec.end_date:
                             derived_sec.start_date = tmpl_sec.start_date
                             derived_sec.end_date = tmpl_sec.end_date
-                            derived_sec.save(update_fields=["start_date", "end_date"])
+                            derived_sec.save(
+                                update_fields=["start_date", "end_date"])
 
                 # Sync resources: clone missing template resources into derived section
                 tmpl_resources = Resource.objects.filter(
@@ -186,7 +191,8 @@ class CourseViewSet(viewsets.ModelViewSet):
                     clone_resource_tree(tmpl_res, derived_sec, parent=None)
 
                 # Sync assignments: one-to-one mapping via template_assignment
-                tmpl_assignments = Assignment.objects.filter(course_section=tmpl_sec).order_by("due_at", "id")
+                tmpl_assignments = Assignment.objects.filter(
+                    course_section=tmpl_sec).order_by("due_at", "id")
                 for tmpl_asg in tmpl_assignments:
                     if tmpl_asg.template_assignment_id:
                         # already a clone of something else; skip
@@ -235,33 +241,38 @@ class CourseViewSet(viewsets.ModelViewSet):
                             )
 
         # Count what was synced
-        total_sections = sum(1 for sg in subject_groups for _ in template_sections)
+        total_sections = sum(
+            1 for sg in subject_groups for _ in template_sections)
         total_resources = sum(
-            len(Resource.objects.filter(course_section=tmpl_sec, parent_resource__isnull=True))
+            len(Resource.objects.filter(
+                course_section=tmpl_sec, parent_resource__isnull=True))
             for tmpl_sec in template_sections
         )
         total_assignments = sum(
-            len(Assignment.objects.filter(course_section=tmpl_sec, template_assignment__isnull=True))
+            len(Assignment.objects.filter(
+                course_section=tmpl_sec, template_assignment__isnull=True))
             for tmpl_sec in template_sections
         )
-        
+
         return Response(
             {
                 "detail": f"Content synced successfully to {len(subject_groups)} subject group(s). "
-                         f"Created {total_sections} section(s), synced {total_resources} resource(s), "
-                         f"and {total_assignments} assignment(s)."
+                f"Created {total_sections} section(s), synced {total_resources} resource(s), "
+                f"and {total_assignments} assignment(s)."
             },
             status=status.HTTP_200_OK,
         )
 
 
 class SubjectGroupViewSet(viewsets.ModelViewSet):
-    queryset = SubjectGroup.objects.select_related('course', 'classroom', 'teacher').all()
+    queryset = SubjectGroup.objects.select_related(
+        'course', 'classroom', 'teacher').all()
     serializer_class = SubjectGroupSerializer
     permission_classes = [AllowAny]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['course', 'classroom', 'teacher']
-    search_fields = ['course__name', 'course__course_code', 'classroom__letter', 'teacher__username']
+    search_fields = ['course__name', 'course__course_code',
+                     'classroom__letter', 'teacher__username']
     ordering_fields = ['course__name', 'classroom__grade', 'classroom__letter']
     ordering = ['course__name', 'classroom__grade', 'classroom__letter']
 
@@ -283,7 +294,8 @@ class SubjectGroupViewSet(viewsets.ModelViewSet):
         - Student: can view only if belongs to the classroom of the subject group
         """
         try:
-            subject_group = SubjectGroup.objects.select_related('course', 'classroom', 'teacher', 'classroom__school').get(id=pk)
+            subject_group = SubjectGroup.objects.select_related(
+                'course', 'classroom', 'teacher', 'classroom__school').get(id=pk)
         except SubjectGroup.DoesNotExist:
             return Response({'error': 'Subject group not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -298,7 +310,8 @@ class SubjectGroupViewSet(viewsets.ModelViewSet):
                 return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
         elif user.role == UserRole.STUDENT:
             # Student must belong to the classroom
-            is_in_classroom = user.classroom_users.filter(classroom_id=subject_group.classroom_id).exists()
+            is_in_classroom = user.classroom_users.filter(
+                classroom_id=subject_group.classroom_id).exists()
             if not is_in_classroom:
                 return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
         # Superadmin: allowed
@@ -359,68 +372,20 @@ class CourseSectionViewSet(viewsets.ModelViewSet):
     search_fields = ['title']
     ordering_fields = ['position', 'title']
     ordering = ['position', 'id']
-    
+
     def get_queryset(self):
         queryset = super().get_queryset()
         user = self.request.user
-        
-<<<<<<< HEAD
-        # Check if filtering by course (template sections)
-        course_id = self.request.query_params.get('course')
-        subject_group_id = self.request.query_params.get('subject_group')
-        
-        # If filtering by course, these are template sections - only superadmins can see them
-        if course_id:
-            if user.role == UserRole.SUPERADMIN:
-                # Superadmins can see all template sections for this course
-                # DjangoFilterBackend will apply the course filter, we just need to ensure subject_group is null
-                queryset = queryset.filter(subject_group__isnull=True)
-            else:
-                # Other roles cannot see template sections
-                return queryset.none()
-        # If filtering by subject_group, these are regular sections - apply role-based filtering
-        elif subject_group_id:
-            # Students can only see course sections from their enrolled classrooms
-            # IMPORTANT: Students should NOT see template sections (where subject_group is null)
-            if user.role == UserRole.STUDENT:
-                student_classrooms = user.classroom_users.values_list('classroom', flat=True)
-                queryset = queryset.filter(
-                    subject_group__classroom__in=student_classrooms,
-                    subject_group__isnull=False  # Exclude template sections
-                )
-            # Teachers can see course sections from their subject groups
-            elif user.role == UserRole.TEACHER:
-                queryset = queryset.filter(subject_group__teacher=user)
-            # School admins can see course sections from their school
-            elif user.role == UserRole.SCHOOLADMIN:
-                queryset = queryset.filter(subject_group__classroom__school=user.school)
-            # Superadmins can see all course sections (default queryset)
-        else:
-            # No filters - apply role-based filtering for all sections
-            # Students can only see course sections from their enrolled classrooms
-            # IMPORTANT: Students should NOT see template sections (where subject_group is null)
-            if user.role == UserRole.STUDENT:
-                student_classrooms = user.classroom_users.values_list('classroom', flat=True)
-                queryset = queryset.filter(
-                    subject_group__classroom__in=student_classrooms,
-                    subject_group__isnull=False  # Exclude template sections
-                )
-            # Teachers can see course sections from their subject groups
-            elif user.role == UserRole.TEACHER:
-                queryset = queryset.filter(subject_group__teacher=user)
-            # School admins can see course sections from their school
-            elif user.role == UserRole.SCHOOLADMIN:
-                queryset = queryset.filter(subject_group__classroom__school=user.school)
-            # Superadmins can see all course sections (default queryset)
-=======
+
         # Check if filtering for template sections (subject_group__isnull)
-        subject_group_isnull = self.request.query_params.get('subject_group__isnull', '').lower()
+        subject_group_isnull = self.request.query_params.get(
+            'subject_group__isnull', '').lower()
         is_template_filter = subject_group_isnull == 'true'
-        
+
         # IMPORTANT: Template sections have course set and subject_group = null
         # Regular sections have subject_group set and course = null
         # Always exclude one type unless explicitly requested
-        
+
         # Students can only see course sections from their enrolled classrooms
         if user.role == UserRole.STUDENT:
             if is_template_filter:
@@ -428,7 +393,8 @@ class CourseSectionViewSet(viewsets.ModelViewSet):
                 queryset = queryset.none()
             else:
                 # Only show regular sections (subject_group set, course null)
-                student_classrooms = user.classroom_users.values_list('classroom', flat=True)
+                student_classrooms = user.classroom_users.values_list(
+                    'classroom', flat=True)
                 queryset = queryset.filter(
                     subject_group__classroom__in=student_classrooms,
                     subject_group__isnull=False,
@@ -438,7 +404,8 @@ class CourseSectionViewSet(viewsets.ModelViewSet):
         elif user.role == UserRole.TEACHER:
             if is_template_filter:
                 # Teachers can see template sections if they have access to the course
-                teacher_courses = user.subject_groups.values_list('course', flat=True).distinct()
+                teacher_courses = user.subject_groups.values_list(
+                    'course', flat=True).distinct()
                 queryset = queryset.filter(
                     course__in=teacher_courses,
                     subject_group__isnull=True,
@@ -474,12 +441,13 @@ class CourseSectionViewSet(viewsets.ModelViewSet):
         elif user.role == UserRole.SUPERADMIN:
             if is_template_filter:
                 # Show only template sections
-                queryset = queryset.filter(subject_group__isnull=True, course__isnull=False)
+                queryset = queryset.filter(
+                    subject_group__isnull=True, course__isnull=False)
             else:
                 # Show only regular sections (exclude template sections)
-                queryset = queryset.filter(subject_group__isnull=False, course__isnull=True)
->>>>>>> 12b6ca4 (small fixes)
-        
+                queryset = queryset.filter(
+                    subject_group__isnull=False, course__isnull=True)
+
         return queryset
 
     @action(detail=False, methods=['patch'], url_path='change-items-order')
@@ -487,16 +455,18 @@ class CourseSectionViewSet(viewsets.ModelViewSet):
         """Bulk update course section positions.
         Body: [{"id": <id>, "position": <pos>}, ...]
         """
-        items = request.data if isinstance(request.data, list) else request.data.get('items', [])
+        items = request.data if isinstance(
+            request.data, list) else request.data.get('items', [])
         if not isinstance(items, list):
             return Response({'error': 'Expected a list payload'}, status=status.HTTP_400_BAD_REQUEST)
-        id_to_pos = {item.get('id'): item.get('position') for item in items if 'id' in item and 'position' in item}
+        id_to_pos = {item.get('id'): item.get('position')
+                     for item in items if 'id' in item and 'position' in item}
         objs = CourseSection.objects.filter(id__in=id_to_pos.keys())
         for obj in objs:
             obj.position = id_to_pos.get(obj.id, obj.position)
         CourseSection.objects.bulk_update(objs, ['position'])
         return Response({'updated': len(objs)})
-    
+
     @action(detail=False, methods=['post'], url_path='auto-create-weeks')
     def auto_create_weeks(self, request):
         """Auto-create weekly sections for a subject group"""
