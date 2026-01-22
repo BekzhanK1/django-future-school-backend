@@ -314,6 +314,17 @@ class UserViewSet(ModelViewSet):
         if self.action == 'create':
             return UserCreateSerializer
         return UserSerializer
+    
+    def create(self, request, *args, **kwargs):
+        """Override create to return full user data with UserSerializer"""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        
+        # Return the created user with full serializer (includes school_name, etc.)
+        output_serializer = UserSerializer(user)
+        headers = self.get_success_headers(output_serializer.data)
+        return Response(output_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
 
 class AuthSessionViewSet(ModelViewSet):

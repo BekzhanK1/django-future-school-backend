@@ -110,46 +110,33 @@ INSTALLED_APPS += ["csp"]
 # Disable X-Frame-Options in favor of CSP
 X_FRAME_OPTIONS = 'SAMEORIGIN'
 
-# CSP Configuration (Flat variables, not a dictionary)
-CSP_DEFAULT_SRC = ("'self'", "https://cdn.jsdelivr.net")
-
-# Frame Ancestors (Who can embed your site)
-CSP_FRAME_ANCESTORS = (
-    "'self'",
-    "http://localhost:3000",
-    "http://localhost:8000",
-    "http://85.198.89.128:3000",
-    "http://85.198.89.128:8000",
-    "https://85.198.89.128:3000",
-    "https://85.198.89.128:8000",
-)
-
-# Script Sources
-CSP_SCRIPT_SRC = (
-    "'self'",
-    "'unsafe-inline'",
-    "https://cdn.jsdelivr.net",
-)
-
-# Style Sources
-CSP_STYLE_SRC = (
-    "'self'",
-    "'unsafe-inline'",
-    "https://cdn.jsdelivr.net",
-)
-
-# Image Sources
-CSP_IMG_SRC = (
-    "'self'",
-    "data:",
-    "https://cdn.jsdelivr.net",
-)
-
-# Font Sources
-CSP_FONT_SRC = (
-    "'self'",
-    "https://cdn.jsdelivr.net",
-)
+# CSP Configuration (django-csp 4.0+ format)
+CONTENT_SECURITY_POLICY = {
+    'DIRECTIVES': {
+        'default-src': ("'self'", 'https://cdn.jsdelivr.net'),
+        'font-src': ("'self'", 'https://cdn.jsdelivr.net'),
+        'frame-ancestors': (
+            "'self'",
+            'http://localhost:3000',
+            'http://localhost:8000',
+            'http://85.198.89.128:3000',
+            'http://85.198.89.128:8000',
+            'https://85.198.89.128:3000',
+            'https://85.198.89.128:8000',
+        ),
+        'img-src': ("'self'", 'data:', 'https://cdn.jsdelivr.net'),
+        'script-src': (
+            "'self'",
+            "'unsafe-inline'",
+            'https://cdn.jsdelivr.net',
+        ),
+        'style-src': (
+            "'self'",
+            "'unsafe-inline'",
+            'https://cdn.jsdelivr.net',
+        ),
+    }
+}
 
 
 # Password validation

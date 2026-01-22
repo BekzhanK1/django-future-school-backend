@@ -45,7 +45,10 @@ class UserCreateSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = User
-        fields = ['username', 'email', 'first_name', 'last_name', 'phone_number', 'password', 'password_confirm', 'role', 'school', 'kundelik_id']
+        fields = ['username', 'email', 'first_name', 'last_name', 'phone_number', 'password', 'password_confirm', 'role', 'school', 'kundelik_id', 'is_active']
+        extra_kwargs = {
+            'is_active': {'default': True}
+        }
     
     def validate(self, attrs):
         if attrs['password'] != attrs['password_confirm']:
@@ -55,6 +58,9 @@ class UserCreateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data.pop('password_confirm')
         password = validated_data.pop('password')
+        # Ensure is_active is True by default if not provided
+        if 'is_active' not in validated_data:
+            validated_data['is_active'] = True
         user = User.objects.create_user(password=password, **validated_data)
         return user
 

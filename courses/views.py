@@ -126,6 +126,15 @@ class CourseViewSet(viewsets.ModelViewSet):
             return clone
 
         for sg in subject_groups:
+            # Remove automatically created sections that are not linked to templates
+            # These were created by the signal when SubjectGroup was created
+            # We'll replace them with template-derived sections
+            CourseSection.objects.filter(
+                subject_group=sg,
+                template_section__isnull=True,
+                course__isnull=True
+            ).delete()
+            
             # For each template section, ensure a derived section for this SubjectGroup exists
             for tmpl_sec in template_sections:
                 derived_sec, created = CourseSection.objects.get_or_create(
@@ -336,7 +345,7 @@ class SubjectGroupViewSet(viewsets.ModelViewSet):
 
 
 class CourseSectionViewSet(viewsets.ModelViewSet):
-    queryset = CourseSection.objects.select_related('subject_group').prefetch_related(
+    queryset = CourseSection.objects.select_related('subject_group', 'course').prefetch_related(
         'resources__children__children__children',  # Support up to 3 levels deep
         'assignments__teacher',
         'assignments__attachments',
@@ -355,6 +364,7 @@ class CourseSectionViewSet(viewsets.ModelViewSet):
         queryset = super().get_queryset()
         user = self.request.user
         
+<<<<<<< HEAD
         # Check if filtering by course (template sections)
         course_id = self.request.query_params.get('course')
         subject_group_id = self.request.query_params.get('subject_group')
@@ -402,6 +412,73 @@ class CourseSectionViewSet(viewsets.ModelViewSet):
             elif user.role == UserRole.SCHOOLADMIN:
                 queryset = queryset.filter(subject_group__classroom__school=user.school)
             # Superadmins can see all course sections (default queryset)
+=======
+        # Check if filtering for template sections (subject_group__isnull)
+        subject_group_isnull = self.request.query_params.get('subject_group__isnull', '').lower()
+        is_template_filter = subject_group_isnull == 'true'
+        
+        # IMPORTANT: Template sections have course set and subject_group = null
+        # Regular sections have subject_group set and course = null
+        # Always exclude one type unless explicitly requested
+        
+        # Students can only see course sections from their enrolled classrooms
+        if user.role == UserRole.STUDENT:
+            if is_template_filter:
+                # Students shouldn't see template sections
+                queryset = queryset.none()
+            else:
+                # Only show regular sections (subject_group set, course null)
+                student_classrooms = user.classroom_users.values_list('classroom', flat=True)
+                queryset = queryset.filter(
+                    subject_group__classroom__in=student_classrooms,
+                    subject_group__isnull=False,
+                    course__isnull=True
+                )
+        # Teachers can see course sections from their subject groups
+        elif user.role == UserRole.TEACHER:
+            if is_template_filter:
+                # Teachers can see template sections if they have access to the course
+                teacher_courses = user.subject_groups.values_list('course', flat=True).distinct()
+                queryset = queryset.filter(
+                    course__in=teacher_courses,
+                    subject_group__isnull=True,
+                    course__isnull=False
+                )
+            else:
+                # Only show regular sections (subject_group set, course null)
+                queryset = queryset.filter(
+                    subject_group__teacher=user,
+                    subject_group__isnull=False,
+                    course__isnull=True
+                )
+        # School admins can see course sections from their school
+        elif user.role == UserRole.SCHOOLADMIN:
+            if is_template_filter:
+                # School admins can see template sections of courses used in their school
+                school_courses = SubjectGroup.objects.filter(
+                    classroom__school=user.school
+                ).values_list('course', flat=True).distinct()
+                queryset = queryset.filter(
+                    course__in=school_courses,
+                    subject_group__isnull=True,
+                    course__isnull=False
+                )
+            else:
+                # Only show regular sections (subject_group set, course null)
+                queryset = queryset.filter(
+                    subject_group__classroom__school=user.school,
+                    subject_group__isnull=False,
+                    course__isnull=True
+                )
+        # Superadmins can see all course sections
+        elif user.role == UserRole.SUPERADMIN:
+            if is_template_filter:
+                # Show only template sections
+                queryset = queryset.filter(subject_group__isnull=True, course__isnull=False)
+            else:
+                # Show only regular sections (exclude template sections)
+                queryset = queryset.filter(subject_group__isnull=False, course__isnull=True)
+>>>>>>> 12b6ca4 (small fixes)
         
         return queryset
 
