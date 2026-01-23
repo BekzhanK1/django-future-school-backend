@@ -19,7 +19,7 @@ from .serializers import (
 )
 from .role_permissions import RoleBasedPermission
 from schools.permissions import IsSuperAdmin, IsSchoolAdminOrSuperAdmin, IsTeacherOrAbove
-from users.models import UserRole
+from users.models import UserRole, User
 from .models import Event
 from .serializers import EventSerializer
 
@@ -76,6 +76,18 @@ class ResourceViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(
                 course_section__subject_group__classroom__in=student_classrooms,
                 course_section__subject_group__isnull=False  # Exclude template sections
+            )
+        # Parents can see resources for their children's courses
+        elif user.role == UserRole.PARENT:
+            children_ids = user.children.filter(role=UserRole.STUDENT).values_list('id', flat=True)
+            children_classrooms = Q()
+            for child_id in children_ids:
+                child = User.objects.get(id=child_id)
+                child_classrooms = child.classroom_users.values_list('classroom', flat=True)
+                children_classrooms |= Q(course_section__subject_group__classroom__in=child_classrooms)
+            queryset = queryset.filter(
+                children_classrooms,
+                course_section__subject_group__isnull=False
             )
         # Teachers can see resources for their subject groups
         elif user.role == UserRole.TEACHER:
@@ -485,6 +497,18 @@ class AssignmentViewSet(viewsets.ModelViewSet):
                 course_section__subject_group__classroom__in=student_classrooms,
                 course_section__subject_group__isnull=False  # Exclude template sections
             )
+        # Parents can see assignments for their children's courses
+        elif user.role == UserRole.PARENT:
+            children_ids = user.children.filter(role=UserRole.STUDENT).values_list('id', flat=True)
+            children_classrooms = Q()
+            for child_id in children_ids:
+                child = User.objects.get(id=child_id)
+                child_classrooms = child.classroom_users.values_list('classroom', flat=True)
+                children_classrooms |= Q(course_section__subject_group__classroom__in=child_classrooms)
+            queryset = queryset.filter(
+                children_classrooms,
+                course_section__subject_group__isnull=False
+            )
         # Teachers can see assignments they created
         elif user.role == UserRole.TEACHER:
             queryset = queryset.filter(teacher=user)
@@ -774,6 +798,10 @@ class SubmissionViewSet(viewsets.ModelViewSet):
         # Students can only see their own submissions
         if user.role == UserRole.STUDENT:
             queryset = queryset.filter(student=user)
+        # Parents can see submissions of their children
+        elif user.role == UserRole.PARENT:
+            children_ids = user.children.filter(role=UserRole.STUDENT).values_list('id', flat=True)
+            queryset = queryset.filter(student_id__in=children_ids)
         # Teachers can see submissions for their assignments only
         elif user.role == UserRole.TEACHER:
             queryset = queryset.filter(assignment__teacher=user)
@@ -873,6 +901,10 @@ class GradeViewSet(viewsets.ModelViewSet):
         # Students can only see grades for their own submissions
         if user.role == UserRole.STUDENT:
             queryset = queryset.filter(submission__student=user)
+        # Parents can see grades for their children's submissions
+        elif user.role == UserRole.PARENT:
+            children_ids = user.children.filter(role=UserRole.STUDENT).values_list('id', flat=True)
+            queryset = queryset.filter(submission__student_id__in=children_ids)
         # Teachers can see grades for submissions to their assignments
         elif user.role == UserRole.TEACHER:
             queryset = queryset.filter(submission__assignment__teacher=user)

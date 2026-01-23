@@ -299,6 +299,16 @@ class UserViewSet(ModelViewSet):
     ordering_fields = ['username', 'email', 'first_name', 'last_name', 'role']
     ordering = ['username']
     
+    def get_permissions(self):
+        """
+        Allow:
+        - Superadmins: full access
+        - Authenticated users: can retrieve their own user object (for parents to see children)
+        """
+        if self.action in ['retrieve'] and self.request.user.is_authenticated:
+            return [permissions.IsAuthenticated()]
+        return [IsSuperAdmin()]
+    
     def get_queryset(self):
         queryset = super().get_queryset()
         

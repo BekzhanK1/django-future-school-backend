@@ -238,6 +238,7 @@ class AttemptSerializer(serializers.ModelSerializer):
         Return serialized answers for this attempt.
 
         For students, answers are only visible when `can_view_results` is True.
+        Parents can see answers for their children's attempts when `can_view_results` is True.
         Teachers and admins can always see answers.
         """
         request = self.context.get('request')
@@ -247,17 +248,25 @@ class AttemptSerializer(serializers.ModelSerializer):
         if user and getattr(user, "role", None) == UserRole.STUDENT and not obj.can_view_results:
             return []
 
+        # If the current user is a parent, check if this is their child's attempt
+        if user and getattr(user, "role", None) == UserRole.PARENT:
+            if obj.student not in user.children.all():
+                return []  # Not parent's child
+            if not obj.can_view_results:
+                return []  # Results not available yet
+
         answers = obj.answers.all().order_by('question__position')
         return AnswerSerializer(answers, many=True, context=self.context).data
 
     def to_representation(self, instance):
         """
-        Hide score-related fields for students until results are available.
+        Hide score-related fields for students and parents until results are available.
         """
         data = super().to_representation(instance)
         request = self.context.get('request')
         user = getattr(request, 'user', None) if request else None
 
+        # For students: hide if results not available
         if user and getattr(user, "role", None) == UserRole.STUDENT and not instance.can_view_results:
             # Keep meta (timestamps, status) but hide evaluation details
             data['score'] = None
@@ -265,6 +274,21 @@ class AttemptSerializer(serializers.ModelSerializer):
             data['percentage'] = None
             # answers are already hidden via get_answers, but ensure consistency
             data['answers'] = []
+
+        # For parents: hide if not their child or results not available
+        if user and getattr(user, "role", None) == UserRole.PARENT:
+            if instance.student not in user.children.all():
+                # Not parent's child - hide everything
+                data['score'] = None
+                data['max_score'] = None
+                data['percentage'] = None
+                data['answers'] = []
+            elif not instance.can_view_results:
+                # Parent's child but results not available yet
+                data['score'] = None
+                data['max_score'] = None
+                data['percentage'] = None
+                data['answers'] = []
 
         return data
 

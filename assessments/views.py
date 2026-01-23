@@ -9,7 +9,7 @@ This module provides comprehensive API endpoints for:
 """
 
 from django.db import transaction
-from django.db.models import Sum, Q
+from django.db.models import Q, Sum
 from django.utils import timezone
 
 from rest_framework import viewsets, status
@@ -24,7 +24,7 @@ from drf_spectacular.types import OpenApiTypes
 
 from schools.permissions import IsSuperAdmin, IsSchoolAdminOrSuperAdmin, IsTeacherOrAbove, IsStudentOrTeacherOrAbove
 from learning.role_permissions import RoleBasedPermission
-from users.models import UserRole
+from users.models import UserRole, User
 
 from .models import Test, Question, Option, Attempt, Answer, QuestionType
 from .serializers import (
@@ -99,12 +99,30 @@ class TestViewSet(viewsets.ModelViewSet):
                     course_section__subject_group__isnull=False,  # Exclude template sections
                     course_section__course__isnull=True  # Only regular sections
                 )
+        # Parents can see tests for their children's courses (never template tests)
+        elif user.role == UserRole.PARENT:
+            if is_template_filter:
+                queryset = queryset.none()
+            else:
+                children_ids = user.children.filter(role=UserRole.STUDENT).values_list('id', flat=True)
+                children_course_sections = Q()
+                for child_id in children_ids:
+                    child = User.objects.get(id=child_id)
+                    child_sections = child.classroom_users.values_list(
+                        'classroom__subject_groups__sections', flat=True
+                    )
+                    children_course_sections |= Q(course_section__in=child_sections)
+                queryset = queryset.filter(
+                    children_course_sections,
+                    course_section__isnull=False,
+                    course_section__subject_group__isnull=False,
+                    course_section__course__isnull=True
+                )
         # Teachers can see tests they created, and template tests for courses they teach
         elif user.role == UserRole.TEACHER:
             if is_template_filter:
                 # Show template tests for courses the teacher teaches
                 teacher_courses = user.subject_groups.values_list('course', flat=True).distinct()
-                from django.db.models import Q
                 queryset = queryset.filter(
                     Q(course_section__isnull=True) | 
                     Q(course_section__course__in=teacher_courses,
@@ -136,7 +154,6 @@ class TestViewSet(viewsets.ModelViewSet):
                 school_courses = Course.objects.filter(
                     subject_groups__classroom__school=user.school
                 ).distinct()
-                from django.db.models import Q
                 queryset = queryset.filter(
                     Q(course_section__isnull=True) | 
                     Q(course_section__course__in=school_courses,
@@ -157,7 +174,6 @@ class TestViewSet(viewsets.ModelViewSet):
                 # Show only template tests:
                 # - course_section is null (template test not tied to section)
                 # OR course_section.course is not null and subject_group is null (template section)
-                from django.db.models import Q
                 queryset = queryset.filter(
                     Q(course_section__isnull=True) | 
                     Q(course_section__subject_group__isnull=True, course_section__course__isnull=False)
@@ -1232,6 +1248,10 @@ class AttemptViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(
                 test__course_section__subject_group__classroom__school=user.school
             )
+        # Parents can see attempts of their children
+        elif user.role == UserRole.PARENT:
+            children_ids = user.children.filter(role=UserRole.STUDENT).values_list('id', flat=True)
+            queryset = queryset.filter(student_id__in=children_ids)
         # Superadmins can see all attempts (default queryset)
 
         return queryset
