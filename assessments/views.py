@@ -32,6 +32,7 @@ from .serializers import (
     CreateAttemptSerializer, SubmitAnswerSerializer, BulkGradeAnswersSerializer,
     ViewResultsSerializer, CreateQuestionSerializer, CreateTestSerializer
 )
+from courses.models import Course, CourseSection
 
 
 class TestViewSet(viewsets.ModelViewSet):
@@ -49,6 +50,7 @@ class TestViewSet(viewsets.ModelViewSet):
     queryset = Test.objects.select_related(
         'course_section__subject_group__course',
         'course_section__subject_group__classroom__school',
+        'course_section__course',  # For template sections
         'teacher'
     ).prefetch_related('questions__options').all()
 
@@ -72,7 +74,7 @@ class TestViewSet(viewsets.ModelViewSet):
     ordering = ['-start_date', '-created_at']
 
     def get_serializer_class(self):
-        if self.action == 'create':
+        if self.action in ['create', 'update', 'partial_update']:
             return CreateTestSerializer
         return TestSerializer
 
@@ -80,24 +82,127 @@ class TestViewSet(viewsets.ModelViewSet):
         queryset = super().get_queryset()
         user = self.request.user
 
-        # Students can only see tests for their courses
+        # Check if filtering for template tests
+        is_template_filter = self.request.query_params.get('is_template', '').lower() == 'true'
+
+        # Students can only see tests for their courses (never template tests)
         if user.role == UserRole.STUDENT:
-            student_course_sections = user.classroom_users.values_list(
-                'classroom__subject_groups__sections', flat=True
-            )
-            queryset = queryset.filter(
-                course_section__in=student_course_sections)
-        # Teachers can see tests they created
+            if is_template_filter:
+                queryset = queryset.none()
+            else:
+                student_course_sections = user.classroom_users.values_list(
+                    'classroom__subject_groups__sections', flat=True
+                )
+                queryset = queryset.filter(
+                    course_section__in=student_course_sections,
+                    course_section__isnull=False,  # Must have a section
+                    course_section__subject_group__isnull=False,  # Exclude template sections
+                    course_section__course__isnull=True  # Only regular sections
+                )
+        # Teachers can see tests they created, and template tests for courses they teach
         elif user.role == UserRole.TEACHER:
-            queryset = queryset.filter(teacher=user)
+            if is_template_filter:
+                # Show template tests for courses the teacher teaches
+                teacher_courses = user.subject_groups.values_list('course', flat=True).distinct()
+                from django.db.models import Q
+                queryset = queryset.filter(
+                    Q(course_section__isnull=True) | 
+                    Q(course_section__course__in=teacher_courses,
+                      course_section__subject_group__isnull=True,
+                      course_section__course__isnull=False)
+                )
+                # Filter by course if provided
+                course_id = self.request.query_params.get('course')
+                if course_id:
+                    try:
+                        queryset = queryset.filter(
+                            Q(course_section__isnull=True) | 
+                            Q(course_section__course_id=int(course_id))
+                        )
+                    except (ValueError, TypeError):
+                        pass
+            else:
+                # Show tests created by teacher (regular tests, not templates)
+                queryset = queryset.filter(
+                    teacher=user,
+                    course_section__isnull=False,
+                    course_section__subject_group__isnull=False,  # Exclude template sections
+                    course_section__course__isnull=True  # Only regular sections
+                )
         # School admins can see tests from their school
         elif user.role == UserRole.SCHOOLADMIN:
-            queryset = queryset.filter(
-                course_section__subject_group__classroom__school=user.school
-            )
+            if is_template_filter:
+                # School admins can see template tests for courses used in their school
+                school_courses = Course.objects.filter(
+                    subject_groups__classroom__school=user.school
+                ).distinct()
+                from django.db.models import Q
+                queryset = queryset.filter(
+                    Q(course_section__isnull=True) | 
+                    Q(course_section__course__in=school_courses,
+                      course_section__subject_group__isnull=True,
+                      course_section__course__isnull=False)
+                )
+            else:
+                queryset = queryset.filter(
+                    course_section__subject_group__classroom__school=user.school,
+                    course_section__isnull=False,
+                    course_section__subject_group__isnull=False,
+                    course_section__course__isnull=True
+                )
         # Superadmins can see all tests (default queryset)
+        # But still respect is_template filter
+        elif user.role == UserRole.SUPERADMIN:
+            if is_template_filter:
+                # Show only template tests:
+                # - course_section is null (template test not tied to section)
+                # OR course_section.course is not null and subject_group is null (template section)
+                from django.db.models import Q
+                queryset = queryset.filter(
+                    Q(course_section__isnull=True) | 
+                    Q(course_section__subject_group__isnull=True, course_section__course__isnull=False)
+                )
+                # Filter by course if provided
+                course_id = self.request.query_params.get('course')
+                if course_id:
+                    try:
+                        # For template tests, filter by course if course_section exists
+                        queryset = queryset.filter(
+                            Q(course_section__isnull=True) | 
+                            Q(course_section__course_id=int(course_id))
+                        )
+                    except (ValueError, TypeError):
+                        pass
+            else:
+                # By default, exclude template tests for superadmins too
+                queryset = queryset.filter(
+                    course_section__isnull=False,
+                    course_section__subject_group__isnull=False,
+                    course_section__course__isnull=True
+                )
 
         return queryset
+
+    def get_object(self):
+        """
+        Override get_object to ensure template tests can be accessed for deletion/update/retrieve
+        even when is_template filter is not set.
+        """
+        # For delete/update/retrieve/copy operations, try to get the object from the base queryset
+        # to avoid filtering issues (especially for template tests)
+        if self.action in ['destroy', 'update', 'partial_update', 'retrieve', 'copy_from_template']:
+            # Use base queryset without filters for these operations
+            queryset = Test.objects.all()
+            lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+            filter_kwargs = {self.lookup_field: self.kwargs[lookup_url_kwarg]}
+            obj = queryset.get(**filter_kwargs)
+            
+            # Check permissions
+            self.check_object_permissions(self.request, obj)
+            return obj
+        
+        # For other operations, use the filtered queryset
+        return super().get_object()
 
     @action(detail=True, methods=['post'], url_path='publish')
     def publish(self, request, pk=None):
@@ -137,8 +242,8 @@ class TestViewSet(viewsets.ModelViewSet):
         """
         test = self.get_object()
 
-        # Only the test teacher can open results for review
-        if request.user != test.teacher:
+        # Only the test teacher or superadmin can open results for review
+        if request.user != test.teacher and request.user.role != UserRole.SUPERADMIN:
             return Response(
                 {'error': 'You can only open results for your own tests'},
                 status=status.HTTP_403_FORBIDDEN
@@ -171,8 +276,8 @@ class TestViewSet(viewsets.ModelViewSet):
         """
         test = self.get_object()
 
-        # Only the test teacher can close results for review
-        if request.user != test.teacher:
+        # Only the test teacher or superadmin can close results for review
+        if request.user != test.teacher and request.user.role != UserRole.SUPERADMIN:
             return Response(
                 {'error': 'You can only close results for your own tests'},
                 status=status.HTTP_403_FORBIDDEN
@@ -188,6 +293,463 @@ class TestViewSet(viewsets.ModelViewSet):
         test.reveal_results_at = None
         test.save(update_fields=['reveal_results_at'])
 
+        serializer = self.get_serializer(test)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='copy-from-template')
+    def copy_from_template(self, request, pk=None):
+        """
+        Copy a template test to a target course section.
+        
+        This endpoint allows teachers to copy a test from a template section
+        to their own course section. The copied test will be linked to the
+        template via template_test field.
+        
+        Request body:
+        {
+            "target_course_section_id": <int>
+        }
+        """
+        template_test = self.get_object()
+        
+        # Verify that this is a template test
+        # Template test: course_section is null OR course_section is a template section
+        is_template = (
+            template_test.course_section is None or
+            (template_test.course_section.course and not template_test.course_section.subject_group)
+        )
+        
+        if not is_template:
+            return Response(
+                {'error': 'This test is not a template test. Only template tests can be copied.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        target_section_id = request.data.get('target_course_section_id')
+        subject_group_id = request.data.get('subject_group_id')  # Optional: for auto-finding section
+        
+        # If template test has a course_section, try to find corresponding section in subject_group
+        if not target_section_id and template_test.course_section and subject_group_id:
+            try:
+                from courses.models import SubjectGroup
+                subject_group = SubjectGroup.objects.get(id=subject_group_id)
+                # Find section in subject_group that corresponds to template section
+                corresponding_section = CourseSection.objects.filter(
+                    subject_group=subject_group,
+                    template_section=template_test.course_section
+                ).first()
+                
+                if corresponding_section:
+                    target_section_id = corresponding_section.id
+            except SubjectGroup.DoesNotExist:
+                pass
+        
+        if not target_section_id:
+            return Response(
+                {'error': 'target_course_section_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            target_section = CourseSection.objects.get(id=target_section_id)
+        except CourseSection.DoesNotExist:
+            return Response(
+                {'error': 'Target course section not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Verify that target section is not a template section
+        if target_section.course and not target_section.subject_group:
+            return Response(
+                {'error': 'Cannot copy to a template section. Target must be a regular section.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Verify teacher has access to the target section
+        if request.user.role == UserRole.TEACHER:
+            if target_section.subject_group.teacher != request.user:
+                return Response(
+                    {'error': 'You do not have access to this course section'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        
+        # Check if test already exists in target section (linked to this template)
+        existing_test = Test.objects.filter(
+            course_section=target_section,
+            template_test=template_test
+        ).first()
+        
+        if existing_test:
+            return Response(
+                {'error': 'This test has already been copied to the target section'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Copy the test with all questions and options
+        with transaction.atomic():
+            # Create the test copy
+            new_test = Test.objects.create(
+                course_section=target_section,
+                teacher=request.user,
+                title=template_test.title,
+                description=template_test.description,
+                is_published=template_test.is_published,  # Use template's published status
+                reveal_results_at=template_test.reveal_results_at,
+                start_date=template_test.start_date,
+                end_date=template_test.end_date,
+                time_limit_minutes=template_test.time_limit_minutes,
+                allow_multiple_attempts=template_test.allow_multiple_attempts,
+                max_attempts=template_test.max_attempts,
+                show_correct_answers=template_test.show_correct_answers,
+                show_feedback=template_test.show_feedback,
+                show_score_immediately=template_test.show_score_immediately,
+                template_test=template_test,
+                is_unlinked_from_template=False
+            )
+            
+            # Copy all questions
+            for template_question in template_test.questions.all().order_by('position', 'id'):
+                new_question = Question.objects.create(
+                    test=new_test,
+                    type=template_question.type,
+                    text=template_question.text,
+                    points=template_question.points,
+                    position=template_question.position,
+                    correct_answer_text=template_question.correct_answer_text,
+                    sample_answer=template_question.sample_answer,
+                    key_words=template_question.key_words,
+                    matching_pairs_json=template_question.matching_pairs_json
+                )
+                
+                # Copy all options for this question
+                for template_option in template_question.options.all().order_by('position', 'id'):
+                    Option.objects.create(
+                        question=new_question,
+                        text=template_option.text,
+                        image_url=template_option.image_url,
+                        is_correct=template_option.is_correct,
+                        position=template_option.position
+                    )
+        
+        serializer = self.get_serializer(new_test)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'], url_path='unlink-from-template')
+    def unlink_from_template(self, request, pk=None):
+        """
+        Unlink this test from its template so it will no longer be auto-synced.
+        """
+        test = self.get_object()
+        if not test.template_test:
+            return Response(
+                {'error': 'This test is not linked to any template'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        test.is_unlinked_from_template = True
+        test.save(update_fields=['is_unlinked_from_template'])
+        serializer = self.get_serializer(test, context={'request': request})
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='relink-to-template')
+    def relink_to_template(self, request, pk=None):
+        """
+        Relink this test to its template so it will be auto-synced again.
+        """
+        test = self.get_object()
+        if not test.template_test:
+            return Response(
+                {'error': 'This test is not linked to any template'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        test.is_unlinked_from_template = False
+        test.save(update_fields=['is_unlinked_from_template'])
+        serializer = self.get_serializer(test, context={'request': request})
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['get'], url_path='sync-status')
+    def sync_status(self, request, pk=None):
+        """
+        Check if test is in sync with its template.
+        Returns sync status for admin and teacher users.
+        """
+        test = self.get_object()
+        
+        if not test.template_test:
+            return Response({
+                'is_linked': False,
+                'is_unlinked': False,
+                'is_outdated': False,
+                'message': 'Test is not linked to any template'
+            })
+        
+        template = test.template_test
+        is_unlinked = test.is_unlinked_from_template
+        
+        # Check if test is outdated (compare key fields with template)
+        is_outdated = False
+        outdated_fields = []
+        
+        if not is_unlinked:
+            # Compare test metadata
+            if test.title != template.title:
+                is_outdated = True
+                outdated_fields.append('title')
+            if test.description != template.description:
+                is_outdated = True
+                outdated_fields.append('description')
+            if test.start_date != template.start_date:
+                is_outdated = True
+                outdated_fields.append('start_date')
+            if test.end_date != template.end_date:
+                is_outdated = True
+                outdated_fields.append('end_date')
+            if test.time_limit_minutes != template.time_limit_minutes:
+                is_outdated = True
+                outdated_fields.append('time_limit_minutes')
+            if test.allow_multiple_attempts != template.allow_multiple_attempts:
+                is_outdated = True
+                outdated_fields.append('allow_multiple_attempts')
+            if test.max_attempts != template.max_attempts:
+                is_outdated = True
+                outdated_fields.append('max_attempts')
+            if test.show_correct_answers != template.show_correct_answers:
+                is_outdated = True
+                outdated_fields.append('show_correct_answers')
+            if test.show_feedback != template.show_feedback:
+                is_outdated = True
+                outdated_fields.append('show_feedback')
+            if test.show_score_immediately != template.show_score_immediately:
+                is_outdated = True
+                outdated_fields.append('show_score_immediately')
+            if test.reveal_results_at != template.reveal_results_at:
+                is_outdated = True
+                outdated_fields.append('reveal_results_at')
+            
+            # Compare questions count and structure
+            template_questions = template.questions.all().order_by('position', 'id')
+            test_questions = test.questions.all().order_by('position', 'id')
+            
+            if template_questions.count() != test_questions.count():
+                is_outdated = True
+                outdated_fields.append('questions_count')
+            else:
+                # Compare each question
+                for tq, q in zip(template_questions, test_questions):
+                    if (tq.type != q.type or 
+                        tq.text != q.text or 
+                        tq.points != q.points or
+                        tq.correct_answer_text != q.correct_answer_text or
+                        tq.sample_answer != q.sample_answer or
+                        tq.key_words != q.key_words or
+                        tq.matching_pairs_json != q.matching_pairs_json):
+                        is_outdated = True
+                        outdated_fields.append('questions')
+                        break
+                    
+                    # Compare options
+                    template_options = tq.options.all().order_by('position', 'id')
+                    test_options = q.options.all().order_by('position', 'id')
+                    
+                    if template_options.count() != test_options.count():
+                        is_outdated = True
+                        outdated_fields.append('options_count')
+                        break
+                    
+                    for to, o in zip(template_options, test_options):
+                        if (to.text != o.text or 
+                            to.image_url != o.image_url or
+                            to.is_correct != o.is_correct):
+                            is_outdated = True
+                            outdated_fields.append('options')
+                            break
+                    
+                    if is_outdated:
+                        break
+        
+        return Response({
+            'is_linked': True,
+            'is_unlinked': is_unlinked,
+            'is_outdated': is_outdated,
+            'outdated_fields': outdated_fields,
+            'template_id': template.id,
+            'message': 'Test is linked to template' if not is_outdated else 'Test is outdated compared to template'
+        })
+
+    @action(detail=True, methods=['post'], url_path='sync-from-template')
+    def sync_from_template(self, request, pk=None):
+        """
+        Sync this test with its template.
+        Only available for superadmins.
+        """
+        from schools.permissions import IsSuperAdmin
+        
+        if not IsSuperAdmin().has_permission(request, self):
+            return Response(
+                {'error': 'Only superadmins can sync individual tests'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        test = self.get_object()
+        
+        if not test.template_test:
+            return Response(
+                {'error': 'Test is not linked to any template'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if test.is_unlinked_from_template:
+            return Response(
+                {'error': 'Test is unlinked from template and cannot be synced'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        template = test.template_test
+        
+        with transaction.atomic():
+            # Check if test has completed attempts (submitted)
+            has_completed_attempts = Attempt.objects.filter(
+                test=test,
+                submitted_at__isnull=False
+            ).exists()
+            
+            # Update test fields (safe to update even with attempts)
+            test.title = template.title
+            test.description = template.description
+            test.reveal_results_at = template.reveal_results_at
+            test.start_date = template.start_date
+            test.end_date = template.end_date
+            test.time_limit_minutes = template.time_limit_minutes
+            test.allow_multiple_attempts = template.allow_multiple_attempts
+            test.max_attempts = template.max_attempts
+            test.show_correct_answers = template.show_correct_answers
+            test.show_feedback = template.show_feedback
+            test.show_score_immediately = template.show_score_immediately
+            test.save()
+            
+            # Sync questions and options (same logic as in sync_content)
+            template_questions = template.questions.all().order_by('position', 'id')
+            test_questions = test.questions.all().order_by('position', 'id')
+            
+            # Create a map of existing questions by position
+            existing_questions_by_pos = {q.position: q for q in test_questions}
+            
+            for tq in template_questions:
+                existing_q = existing_questions_by_pos.get(tq.position)
+                
+                if existing_q:
+                    # Update existing question
+                    # Check if question has answers
+                    question_has_answers = False
+                    options_with_answers = set()
+                    if has_completed_attempts:
+                        question_has_answers = Answer.objects.filter(
+                            question=existing_q,
+                            attempt__test=test,
+                            attempt__submitted_at__isnull=False
+                        ).exists()
+                        
+                        if question_has_answers:
+                            options_with_answers = set(
+                                Answer.objects.filter(
+                                    question=existing_q,
+                                    attempt__test=test,
+                                    attempt__submitted_at__isnull=False
+                                ).values_list('selected_options__id', flat=True)
+                            )
+                    
+                    # Update question fields (be careful with correct_answer_text if has answers)
+                    if not question_has_answers or tq.correct_answer_text == existing_q.correct_answer_text:
+                        existing_q.type = tq.type
+                        existing_q.text = tq.text
+                        existing_q.points = tq.points
+                        existing_q.correct_answer_text = tq.correct_answer_text
+                        existing_q.sample_answer = tq.sample_answer
+                        existing_q.key_words = tq.key_words
+                        existing_q.matching_pairs_json = tq.matching_pairs_json
+                        existing_q.save()
+                    else:
+                        # Only update safe fields if question has answers
+                        existing_q.type = tq.type
+                        existing_q.text = tq.text
+                        existing_q.points = tq.points
+                        existing_q.sample_answer = tq.sample_answer
+                        existing_q.key_words = tq.key_words
+                        existing_q.matching_pairs_json = tq.matching_pairs_json
+                        existing_q.save()
+                    
+                    # Sync options
+                    template_options = tq.options.all().order_by('position', 'id')
+                    existing_options = existing_q.options.all().order_by('position', 'id')
+                    existing_options_by_pos = {opt.position: opt for opt in existing_options}
+                    
+                    # Remove options that no longer exist in template (but not if they have answers)
+                    for existing_opt in existing_options:
+                        if not any(to.position == existing_opt.position for to in template_options):
+                            if existing_opt.id not in options_with_answers:
+                                existing_opt.delete()
+                    
+                    # Create or update options
+                    for to in template_options:
+                        existing_opt = existing_options_by_pos.get(to.position)
+                        
+                        if existing_opt:
+                            # Update text and image (safe)
+                            existing_opt.text = to.text
+                            existing_opt.image_url = to.image_url
+                            
+                            # Only update is_correct if this option has no answers
+                            opt_has_answers = existing_opt.id in options_with_answers
+                            if not opt_has_answers:
+                                existing_opt.is_correct = to.is_correct
+                                existing_opt.save(update_fields=['text', 'image_url', 'is_correct'])
+                            else:
+                                existing_opt.save(update_fields=['text', 'image_url'])
+                        else:
+                            Option.objects.create(
+                                question=existing_q,
+                                text=to.text,
+                                image_url=to.image_url,
+                                is_correct=to.is_correct,
+                                position=to.position
+                            )
+                else:
+                    # Create new question
+                    new_q = Question.objects.create(
+                        test=test,
+                        type=tq.type,
+                        text=tq.text,
+                        points=tq.points,
+                        position=tq.position,
+                        correct_answer_text=tq.correct_answer_text,
+                        sample_answer=tq.sample_answer,
+                        key_words=tq.key_words,
+                        matching_pairs_json=tq.matching_pairs_json
+                    )
+                    
+                    # Copy options for new question
+                    for to in tq.options.all().order_by('position', 'id'):
+                        Option.objects.create(
+                            question=new_q,
+                            text=to.text,
+                            image_url=to.image_url,
+                            is_correct=to.is_correct,
+                            position=to.position
+                        )
+            
+            # Remove questions that no longer exist in template (but not if they have answers)
+            template_positions = {tq.position for tq in template_questions}
+            for existing_q in test_questions:
+                if existing_q.position not in template_positions:
+                    if has_completed_attempts:
+                        has_answers = Answer.objects.filter(
+                            question=existing_q,
+                            attempt__test=test,
+                            attempt__submitted_at__isnull=False
+                        ).exists()
+                        if has_answers:
+                            continue  # Don't delete questions with answers
+                    existing_q.delete()
+        
         serializer = self.get_serializer(test)
         return Response(serializer.data)
 
@@ -226,8 +788,8 @@ class TestViewSet(viewsets.ModelViewSet):
         """
         test = self.get_object()
 
-        # Validate teacher access
-        if request.user != test.teacher:
+        # Validate teacher or superadmin access
+        if request.user != test.teacher and request.user.role != UserRole.SUPERADMIN:
             return Response(
                 {'error': 'You can only view results for your own tests'},
                 status=status.HTTP_403_FORBIDDEN

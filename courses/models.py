@@ -7,6 +7,7 @@ class Course(models.Model):
     name = models.CharField(max_length=255)
     description = models.TextField(null=True, blank=True)
     grade = models.PositiveSmallIntegerField()
+    language = models.CharField(max_length=50, default='kazakh', help_text="Language of instruction (e.g., 'kazakh', 'russian', 'english')")
 
     class Meta:
         constraints = [

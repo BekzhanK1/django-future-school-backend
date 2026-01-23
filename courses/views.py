@@ -35,7 +35,7 @@ class CourseViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='sync-content')
     def sync_content(self, request, pk=None):
         """
-        Sync template CourseSections, Resources, and Assignments from this Course
+        Sync template CourseSections, Resources, Assignments, and Tests from this Course
         into all SubjectGroups of the course.
 
         Usage:
@@ -44,7 +44,9 @@ class CourseViewSet(viewsets.ModelViewSet):
         """
         from datetime import date, timedelta, datetime
         from django.utils import timezone
+        from django.db import transaction
         from learning.models import Resource, Assignment, AssignmentAttachment
+        from assessments.models import Test, Question, Option
 
         course = self.get_object()
 
@@ -314,6 +316,242 @@ class CourseViewSet(viewsets.ModelViewSet):
                                 position=att.position,
                             )
 
+                # Sync tests: one-to-one mapping via template_test
+                tmpl_tests = Test.objects.filter(
+                    course_section=tmpl_sec,
+                    template_test__isnull=True,  # Only root template tests
+                ).order_by("start_date", "id")
+
+                for tmpl_test in tmpl_tests:
+                    derived_test = Test.objects.filter(
+                        course_section=derived_sec,
+                        template_test=tmpl_test,
+                    ).first()
+
+                    if derived_test:
+                        # Update existing test if it's not unlinked from template
+                        if not derived_test.is_unlinked_from_template:
+                            with transaction.atomic():
+                                # Check if test has completed attempts (submitted)
+                                from assessments.models import Attempt
+                                has_completed_attempts = Attempt.objects.filter(
+                                    test=derived_test,
+                                    submitted_at__isnull=False
+                                ).exists()
+
+                                # Update test fields (safe to update even with attempts)
+                                derived_test.title = tmpl_test.title
+                                derived_test.description = tmpl_test.description
+                                derived_test.is_published = tmpl_test.is_published  # Sync published status
+                                derived_test.reveal_results_at = tmpl_test.reveal_results_at
+                                derived_test.start_date = tmpl_test.start_date
+                                derived_test.end_date = tmpl_test.end_date
+                                derived_test.time_limit_minutes = tmpl_test.time_limit_minutes
+                                derived_test.allow_multiple_attempts = tmpl_test.allow_multiple_attempts
+                                derived_test.max_attempts = tmpl_test.max_attempts
+                                derived_test.show_correct_answers = tmpl_test.show_correct_answers
+                                derived_test.show_feedback = tmpl_test.show_feedback
+                                derived_test.show_score_immediately = tmpl_test.show_score_immediately
+                                derived_test.save(update_fields=[
+                                    'title', 'description', 'is_published', 'reveal_results_at', 'start_date', 'end_date',
+                                    'time_limit_minutes', 'allow_multiple_attempts', 'max_attempts',
+                                    'show_correct_answers', 'show_feedback', 'show_score_immediately'
+                                ])
+
+                                # Sync questions: remove old ones and create/update new ones
+                                from assessments.models import Answer
+                                existing_questions = list(
+                                    derived_test.questions.all())
+                                template_questions = list(
+                                    tmpl_test.questions.all().order_by('position', 'id'))
+
+                                # Remove questions that no longer exist in template
+                                # BUT: Don't delete questions that have answers from completed attempts
+                                for existing_q in existing_questions:
+                                    if not any(
+                                        tq.position == existing_q.position and
+                                        tq.type == existing_q.type
+                                        for tq in template_questions
+                                    ):
+                                        # Check if this question has answers from completed attempts
+                                        if has_completed_attempts:
+                                            has_answers = Answer.objects.filter(
+                                                question=existing_q,
+                                                attempt__test=derived_test,
+                                                attempt__submitted_at__isnull=False
+                                            ).exists()
+                                            if has_answers:
+                                                # Don't delete - mark as deprecated or skip
+                                                # For now, we'll skip deletion to preserve student answers
+                                                continue
+                                        # Safe to delete if no completed attempts or no answers
+                                        existing_q.delete()
+
+                                # Create or update questions
+                                for tq in template_questions:
+                                    existing_q = derived_test.questions.filter(
+                                        position=tq.position,
+                                        type=tq.type
+                                    ).first()
+
+                                    if existing_q:
+                                        # Check if this question has answers from completed attempts
+                                        question_has_answers = False
+                                        if has_completed_attempts:
+                                            question_has_answers = Answer.objects.filter(
+                                                question=existing_q,
+                                                attempt__test=derived_test,
+                                                attempt__submitted_at__isnull=False
+                                            ).exists()
+
+                                        # Update existing question
+                                        # Safe to update text and metadata even with answers
+                                        existing_q.text = tq.text
+                                        existing_q.points = tq.points
+                                        # Only update correct_answer_text if no completed attempts
+                                        # (changing correct answer would invalidate student scores)
+                                        if not question_has_answers:
+                                            existing_q.correct_answer_text = tq.correct_answer_text
+                                        existing_q.sample_answer = tq.sample_answer
+                                        existing_q.key_words = tq.key_words
+                                        existing_q.matching_pairs_json = tq.matching_pairs_json
+
+                                        update_fields = [
+                                            'text', 'points', 'sample_answer', 'key_words', 'matching_pairs_json']
+                                        if not question_has_answers:
+                                            update_fields.append(
+                                                'correct_answer_text')
+
+                                        existing_q.save(
+                                            update_fields=update_fields)
+
+                                        # Sync options for this question
+                                        existing_options = list(
+                                            existing_q.options.all())
+                                        template_options = list(
+                                            tq.options.all().order_by('position', 'id'))
+
+                                        # Check which options have answers
+                                        options_with_answers = set()
+                                        if question_has_answers:
+                                            from assessments.models import Answer
+                                            options_with_answers = set(
+                                                Answer.objects.filter(
+                                                    question=existing_q,
+                                                    attempt__test=derived_test,
+                                                    attempt__submitted_at__isnull=False
+                                                ).values_list('selected_options__id', flat=True)
+                                            )
+
+                                        # Remove options that no longer exist in template
+                                        # BUT: Don't delete options that have answers
+                                        for existing_opt in existing_options:
+                                            if not any(
+                                                to.position == existing_opt.position
+                                                for to in template_options
+                                            ):
+                                                # Don't delete if this option has answers
+                                                if existing_opt.id in options_with_answers:
+                                                    continue
+                                                existing_opt.delete()
+
+                                        # Create or update options
+                                        for to in template_options:
+                                            existing_opt = existing_q.options.filter(
+                                                position=to.position
+                                            ).first()
+
+                                            if existing_opt:
+                                                # Update text and image (safe)
+                                                existing_opt.text = to.text
+                                                existing_opt.image_url = to.image_url
+
+                                                # Only update is_correct if this option has no answers
+                                                # (changing correctness would invalidate student scores)
+                                                opt_has_answers = existing_opt.id in options_with_answers
+                                                if not opt_has_answers:
+                                                    existing_opt.is_correct = to.is_correct
+                                                    existing_opt.save(
+                                                        update_fields=['text', 'image_url', 'is_correct'])
+                                                else:
+                                                    existing_opt.save(
+                                                        update_fields=['text', 'image_url'])
+                                            else:
+                                                Option.objects.create(
+                                                    question=existing_q,
+                                                    text=to.text,
+                                                    image_url=to.image_url,
+                                                    is_correct=to.is_correct,
+                                                    position=to.position
+                                                )
+                                    else:
+                                        # Create new question
+                                        new_q = Question.objects.create(
+                                            test=derived_test,
+                                            type=tq.type,
+                                            text=tq.text,
+                                            points=tq.points,
+                                            position=tq.position,
+                                            correct_answer_text=tq.correct_answer_text,
+                                            sample_answer=tq.sample_answer,
+                                            key_words=tq.key_words,
+                                            matching_pairs_json=tq.matching_pairs_json
+                                        )
+
+                                        # Copy options for new question
+                                        for to in tq.options.all().order_by('position', 'id'):
+                                            Option.objects.create(
+                                                question=new_q,
+                                                text=to.text,
+                                                image_url=to.image_url,
+                                                is_correct=to.is_correct,
+                                                position=to.position
+                                            )
+                    else:
+                        # Create new test
+                        with transaction.atomic():
+                            new_test = Test.objects.create(
+                                course_section=derived_sec,
+                                teacher=tmpl_test.teacher,
+                                title=tmpl_test.title,
+                                description=tmpl_test.description,
+                                is_published=tmpl_test.is_published,  # Use template's published status
+                                reveal_results_at=tmpl_test.reveal_results_at,
+                                start_date=tmpl_test.start_date,
+                                end_date=tmpl_test.end_date,
+                                time_limit_minutes=tmpl_test.time_limit_minutes,
+                                allow_multiple_attempts=tmpl_test.allow_multiple_attempts,
+                                max_attempts=tmpl_test.max_attempts,
+                                show_correct_answers=tmpl_test.show_correct_answers,
+                                show_feedback=tmpl_test.show_feedback,
+                                show_score_immediately=tmpl_test.show_score_immediately,
+                                template_test=tmpl_test,
+                                is_unlinked_from_template=False
+                            )
+
+                            # Copy all questions and options
+                            for tq in tmpl_test.questions.all().order_by('position', 'id'):
+                                new_q = Question.objects.create(
+                                    test=new_test,
+                                    type=tq.type,
+                                    text=tq.text,
+                                    points=tq.points,
+                                    position=tq.position,
+                                    correct_answer_text=tq.correct_answer_text,
+                                    sample_answer=tq.sample_answer,
+                                    key_words=tq.key_words,
+                                    matching_pairs_json=tq.matching_pairs_json
+                                )
+
+                                for to in tq.options.all().order_by('position', 'id'):
+                                    Option.objects.create(
+                                        question=new_q,
+                                        text=to.text,
+                                        image_url=to.image_url,
+                                        is_correct=to.is_correct,
+                                        position=to.position
+                                    )
+
         # Count what was synced
         total_sections = sum(
             1 for sg in subject_groups for _ in template_sections)
@@ -327,12 +565,17 @@ class CourseViewSet(viewsets.ModelViewSet):
                 course_section=tmpl_sec, template_assignment__isnull=True))
             for tmpl_sec in template_sections
         )
+        total_tests = sum(
+            len(Test.objects.filter(
+                course_section=tmpl_sec, template_test__isnull=True))
+            for tmpl_sec in template_sections
+        )
 
         return Response(
             {
                 "detail": f"Content synced successfully to {len(subject_groups)} subject group(s). "
                 f"Created {total_sections} section(s), synced {total_resources} resource(s), "
-                f"and {total_assignments} assignment(s)."
+                f"{total_assignments} assignment(s), and {total_tests} test(s)."
             },
             status=status.HTTP_200_OK,
         )
@@ -354,8 +597,666 @@ class SubjectGroupViewSet(viewsets.ModelViewSet):
         # Keep SubjectGroup management for superadmins only, but allow role-based access to the
         # read-only `members` endpoint.
         if getattr(self, 'action', None) == 'members':
-            return [IsTeacherOrAbove()]  # teachers, school admins, superadmins
+            from schools.permissions import IsStudentOrTeacherOrAbove
+            # students, teachers, school admins, superadmins
+            return [IsStudentOrTeacherOrAbove()]
         return super().get_permissions()
+
+    @action(detail=True, methods=['get'], url_path='sync-status')
+    def sync_status(self, request, pk=None):
+        """
+        Check if SubjectGroup is fully synced with its course template.
+        Returns sync status indicating if all resources, assignments, and tests are synced.
+        """
+        from learning.models import Resource, Assignment
+        from assessments.models import Test
+
+        subject_group = self.get_object()
+        course = subject_group.course
+
+        if not course:
+            return Response({
+                'is_synced': False,
+                'message': 'SubjectGroup has no associated course'
+            })
+
+        # Get all template sections for the course
+        template_sections = CourseSection.objects.filter(
+            course=course,
+            subject_group__isnull=True
+        )
+
+        if not template_sections.exists():
+            return Response({
+                'is_synced': True,
+                'message': 'No template sections to sync'
+            })
+
+        # Check each template section
+        is_synced = True
+        missing_items = []
+        outdated_items = []
+
+        for tmpl_sec in template_sections:
+            # Find corresponding derived section
+            derived_sec = CourseSection.objects.filter(
+                subject_group=subject_group,
+                template_section=tmpl_sec
+            ).first()
+
+            if not derived_sec:
+                is_synced = False
+                missing_items.append({
+                    'type': 'section',
+                    'template_section_id': tmpl_sec.id,
+                    'template_section_title': tmpl_sec.title
+                })
+                continue
+
+            # Check resources
+            tmpl_resources = Resource.objects.filter(
+                course_section=tmpl_sec,
+                parent_resource__isnull=True
+            )
+            for tmpl_res in tmpl_resources:
+                derived_res = Resource.objects.filter(
+                    course_section=derived_sec,
+                    template_resource=tmpl_res
+                ).first()
+                if not derived_res:
+                    is_synced = False
+                    missing_items.append({
+                        'type': 'resource',
+                        'template_id': tmpl_res.id,
+                        'template_title': tmpl_res.title,
+                        'section_title': derived_sec.title
+                    })
+                elif not derived_res.is_unlinked_from_template:
+                    # Check if outdated
+                    if (derived_res.title != tmpl_res.title or
+                        derived_res.description != tmpl_res.description or
+                            derived_res.type != tmpl_res.type):
+                        is_synced = False
+                        outdated_items.append({
+                            'type': 'resource',
+                            'id': derived_res.id,
+                            'title': derived_res.title,
+                            'section_title': derived_sec.title
+                        })
+
+            # Check assignments
+            tmpl_assignments = Assignment.objects.filter(
+                course_section=tmpl_sec,
+                template_assignment__isnull=True
+            )
+            for tmpl_asg in tmpl_assignments:
+                derived_asg = Assignment.objects.filter(
+                    course_section=derived_sec,
+                    template_assignment=tmpl_asg
+                ).first()
+                if not derived_asg:
+                    is_synced = False
+                    missing_items.append({
+                        'type': 'assignment',
+                        'template_id': tmpl_asg.id,
+                        'template_title': tmpl_asg.title,
+                        'section_title': derived_sec.title
+                    })
+                elif not derived_asg.is_unlinked_from_template:
+                    # Check if outdated
+                    if (derived_asg.title != tmpl_asg.title or
+                            derived_asg.description != tmpl_asg.description):
+                        is_synced = False
+                        outdated_items.append({
+                            'type': 'assignment',
+                            'id': derived_asg.id,
+                            'title': derived_asg.title,
+                            'section_title': derived_sec.title
+                        })
+
+            # Check tests
+            tmpl_tests = Test.objects.filter(
+                course_section=tmpl_sec,
+                template_test__isnull=True
+            ).prefetch_related('questions__options')
+            for tmpl_test in tmpl_tests:
+                derived_test = Test.objects.filter(
+                    course_section=derived_sec,
+                    template_test=tmpl_test
+                ).prefetch_related('questions__options').first()
+                if not derived_test:
+                    is_synced = False
+                    missing_items.append({
+                        'type': 'test',
+                        'template_id': tmpl_test.id,
+                        'template_title': tmpl_test.title,
+                        'section_title': derived_sec.title
+                    })
+                elif not derived_test.is_unlinked_from_template:
+                    # Deep check if outdated (same logic as TestViewSet.sync_status)
+                    is_test_outdated = False
+
+                    # Compare test metadata
+                    if (derived_test.title != tmpl_test.title or
+                        derived_test.description != tmpl_test.description or
+                        derived_test.start_date != tmpl_test.start_date or
+                        derived_test.end_date != tmpl_test.end_date or
+                        derived_test.time_limit_minutes != tmpl_test.time_limit_minutes or
+                        derived_test.allow_multiple_attempts != tmpl_test.allow_multiple_attempts or
+                        derived_test.max_attempts != tmpl_test.max_attempts or
+                        derived_test.show_correct_answers != tmpl_test.show_correct_answers or
+                        derived_test.show_feedback != tmpl_test.show_feedback or
+                        derived_test.show_score_immediately != tmpl_test.show_score_immediately or
+                            derived_test.reveal_results_at != tmpl_test.reveal_results_at):
+                        is_test_outdated = True
+                    else:
+                        # Compare questions count and structure
+                        from assessments.models import Question, Option
+                        template_questions = tmpl_test.questions.all().order_by('position', 'id')
+                        test_questions = derived_test.questions.all().order_by('position', 'id')
+
+                        if template_questions.count() != test_questions.count():
+                            is_test_outdated = True
+                        else:
+                            # Compare each question
+                            for tq, q in zip(template_questions, test_questions):
+                                if (tq.type != q.type or
+                                    tq.text != q.text or
+                                    tq.points != q.points or
+                                    tq.correct_answer_text != q.correct_answer_text or
+                                    tq.sample_answer != q.sample_answer or
+                                    tq.key_words != q.key_words or
+                                        tq.matching_pairs_json != q.matching_pairs_json):
+                                    is_test_outdated = True
+                                    break
+
+                                # Compare options
+                                template_options = tq.options.all().order_by('position', 'id')
+                                test_options = q.options.all().order_by('position', 'id')
+
+                                if template_options.count() != test_options.count():
+                                    is_test_outdated = True
+                                    break
+
+                                for to, o in zip(template_options, test_options):
+                                    if (to.text != o.text or
+                                        to.image_url != o.image_url or
+                                            to.is_correct != o.is_correct):
+                                        is_test_outdated = True
+                                        break
+
+                                if is_test_outdated:
+                                    break
+
+                    if is_test_outdated:
+                        is_synced = False
+                        outdated_items.append({
+                            'type': 'test',
+                            'id': derived_test.id,
+                            'title': derived_test.title,
+                            'section_title': derived_sec.title
+                        })
+
+        return Response({
+            'is_synced': is_synced,
+            'missing_items': missing_items,
+            'outdated_items': outdated_items,
+            'missing_count': len(missing_items),
+            'outdated_count': len(outdated_items),
+            'message': 'Fully synced' if is_synced else f'Missing {len(missing_items)} items, {len(outdated_items)} outdated'
+        })
+
+    @action(detail=True, methods=['post'], url_path='sync')
+    def sync_subject_group(self, request, pk=None):
+        """
+        Sync content from course template to this specific SubjectGroup.
+        Similar to sync_content but for a single SubjectGroup.
+        """
+        from datetime import date, timedelta, datetime
+        from django.utils import timezone
+        from django.db import transaction
+        from learning.models import Resource, Assignment, AssignmentAttachment
+        from assessments.models import Test, Question, Option
+
+        subject_group = self.get_object()
+        course = subject_group.course
+
+        if not course:
+            return Response(
+                {"detail": "SubjectGroup has no associated course"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Academic year start date: can be provided explicitly or inferred
+        academic_start_str = request.data.get("academic_start_date")
+
+        def infer_academic_start(today: date) -> date:
+            if today.month >= 9:
+                year = today.year
+            else:
+                year = today.year - 1
+            return date(year, 9, 1)
+
+        today = timezone.now().date()
+        if academic_start_str:
+            try:
+                academic_start_date = date.fromisoformat(academic_start_str)
+            except ValueError:
+                return Response(
+                    {"detail": "Invalid academic_start_date, expected YYYY-MM-DD"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        else:
+            academic_start_date = infer_academic_start(today)
+
+        # Get template sections
+        template_sections = CourseSection.objects.filter(
+            course=course,
+            subject_group__isnull=True,
+        ).order_by("position", "id")
+
+        if not template_sections.exists():
+            return Response(
+                {"detail": "No template sections found for this course."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Use the same sync logic as sync_content but for single SubjectGroup
+        # This is a simplified version - we can refactor sync_content to accept subject_groups parameter
+        # For now, let's call the course sync but filter to this subject_group only
+        # Actually, better to extract the sync logic into a helper function
+
+        # For simplicity, let's reuse the sync_content logic by temporarily filtering
+        # But that's not ideal. Let's create a helper function instead.
+
+        # Actually, the simplest approach is to call sync_content endpoint logic
+        # but we need to extract it. For now, let's duplicate the logic for single SG
+
+        # Remove auto-created sections
+        CourseSection.objects.filter(
+            subject_group=subject_group,
+            template_section__isnull=True,
+            course__isnull=True
+        ).delete()
+
+        synced_sections = 0
+        # Use list to allow modification in nested function
+        synced_resources = [0]
+        synced_assignments = 0
+        synced_tests = 0
+
+        # Helper function for cloning resources (same as in sync_content)
+        def clone_resource_tree(template_res: Resource, target_section: CourseSection, parent: Resource | None):
+            existing = Resource.objects.filter(
+                course_section=target_section,
+                template_resource=template_res,
+            ).first()
+
+            if existing:
+                if not existing.is_unlinked_from_template:
+                    existing.type = template_res.type
+                    existing.title = template_res.title
+                    existing.description = template_res.description
+                    existing.url = template_res.url
+                    if template_res.file:
+                        existing.file = template_res.file
+                    existing.position = template_res.position
+                    existing.save(
+                        update_fields=['type', 'title', 'description', 'url', 'file', 'position'])
+                clone = existing
+            else:
+                clone = Resource.objects.create(
+                    course_section=target_section,
+                    parent_resource=parent,
+                    template_resource=template_res,
+                    type=template_res.type,
+                    title=template_res.title,
+                    description=template_res.description,
+                    url=template_res.url,
+                    file=template_res.file,
+                    position=template_res.position,
+                )
+                synced_resources[0] += 1
+
+            for child in template_res.children.all().order_by("position", "id"):
+                clone_resource_tree(child, target_section, clone)
+
+            return clone
+
+        for tmpl_sec in template_sections:
+            derived_sec, created = CourseSection.objects.get_or_create(
+                subject_group=subject_group,
+                template_section=tmpl_sec,
+                defaults={
+                    "course": None,
+                    "title": tmpl_sec.title,
+                    "is_general": tmpl_sec.is_general,
+                    "position": tmpl_sec.position,
+                },
+            )
+
+            if created:
+                synced_sections += 1
+
+            # Compute dates
+            if derived_sec.start_date is None or created:
+                offset_days = None
+                if tmpl_sec.template_start_offset_days is not None:
+                    offset_days = tmpl_sec.template_start_offset_days
+                elif tmpl_sec.template_week_index is not None:
+                    offset_days = tmpl_sec.template_week_index * 7
+
+                if offset_days is not None:
+                    start_date = academic_start_date + \
+                        timedelta(days=offset_days)
+                    duration = tmpl_sec.template_duration_days
+                    if not duration and tmpl_sec.start_date and tmpl_sec.end_date:
+                        duration = (tmpl_sec.end_date -
+                                    tmpl_sec.start_date).days + 1
+                    if not duration:
+                        duration = 7
+                    end_date = start_date + timedelta(days=duration - 1)
+                    derived_sec.start_date = start_date
+                    derived_sec.end_date = end_date
+                    derived_sec.save(update_fields=["start_date", "end_date"])
+                elif tmpl_sec.start_date and tmpl_sec.end_date:
+                    derived_sec.start_date = tmpl_sec.start_date
+                    derived_sec.end_date = tmpl_sec.end_date
+                    derived_sec.save(update_fields=["start_date", "end_date"])
+
+            # Sync resources, assignments, and tests (same logic as sync_content)
+            # For brevity, I'll include the key parts - resources, assignments, tests
+            # This is getting long, so let me extract the sync logic properly
+
+            # Actually, let's just call the course sync endpoint logic but for one SG
+            # The cleanest way is to refactor sync_content to accept subject_groups parameter
+            # But for now, let's complete this implementation
+
+            # Sync resources
+            tmpl_resources = Resource.objects.filter(
+                course_section=tmpl_sec,
+                parent_resource__isnull=True,
+            ).order_by("position", "id")
+            for tmpl_res in tmpl_resources:
+                clone_resource_tree(tmpl_res, derived_sec, parent=None)
+
+            # Sync assignments (simplified - same pattern as sync_content)
+            tmpl_assignments = Assignment.objects.filter(
+                course_section=tmpl_sec,
+                template_assignment__isnull=True,
+            ).order_by("due_at", "id")
+            for tmpl_asg in tmpl_assignments:
+                derived_asg = Assignment.objects.filter(
+                    course_section=derived_sec,
+                    template_assignment=tmpl_asg,
+                ).first()
+
+                due_at = tmpl_asg.due_at
+                if (derived_sec.start_date and
+                    tmpl_asg.template_offset_days_from_section_start is not None and
+                        tmpl_asg.template_due_time is not None):
+                    due_date = derived_sec.start_date + timedelta(
+                        days=tmpl_asg.template_offset_days_from_section_start
+                    )
+                    due_at = datetime.combine(
+                        due_date,
+                        tmpl_asg.template_due_time,
+                        tzinfo=timezone.get_current_timezone(),
+                    )
+
+                if derived_asg:
+                    if not derived_asg.is_unlinked_from_template:
+                        derived_asg.title = tmpl_asg.title
+                        derived_asg.description = tmpl_asg.description
+                        derived_asg.due_at = due_at
+                        derived_asg.max_grade = tmpl_asg.max_grade
+                        if tmpl_asg.file:
+                            derived_asg.file = tmpl_asg.file
+                        derived_asg.save(
+                            update_fields=['title', 'description', 'due_at', 'max_grade', 'file'])
+                else:
+                    derived_asg = Assignment.objects.create(
+                        course_section=derived_sec,
+                        template_assignment=tmpl_asg,
+                        teacher=tmpl_asg.teacher,
+                        title=tmpl_asg.title,
+                        description=tmpl_asg.description,
+                        due_at=due_at,
+                        max_grade=tmpl_asg.max_grade,
+                        file=tmpl_asg.file,
+                    )
+                    synced_assignments += 1
+
+                    for att in tmpl_asg.attachments.all().order_by("position", "id"):
+                        AssignmentAttachment.objects.create(
+                            assignment=derived_asg,
+                            type=att.type,
+                            title=att.title,
+                            content=att.content,
+                            file_url=att.file_url,
+                            file=att.file,
+                            position=att.position,
+                        )
+
+            # Sync tests (same pattern)
+            tmpl_tests = Test.objects.filter(
+                course_section=tmpl_sec,
+                template_test__isnull=True,
+            ).order_by("start_date", "id")
+
+            for tmpl_test in tmpl_tests:
+                derived_test = Test.objects.filter(
+                    course_section=derived_sec,
+                    template_test=tmpl_test,
+                ).first()
+
+                if derived_test:
+                    if not derived_test.is_unlinked_from_template:
+                        with transaction.atomic():
+                            # Check if test has completed attempts (submitted)
+                            from assessments.models import Attempt, Answer
+                            has_completed_attempts = Attempt.objects.filter(
+                                test=derived_test,
+                                submitted_at__isnull=False
+                            ).exists()
+
+                            derived_test.title = tmpl_test.title
+                            derived_test.description = tmpl_test.description
+                            derived_test.is_published = tmpl_test.is_published  # Sync published status
+                            derived_test.reveal_results_at = tmpl_test.reveal_results_at
+                            derived_test.start_date = tmpl_test.start_date
+                            derived_test.end_date = tmpl_test.end_date
+                            derived_test.time_limit_minutes = tmpl_test.time_limit_minutes
+                            derived_test.allow_multiple_attempts = tmpl_test.allow_multiple_attempts
+                            derived_test.max_attempts = tmpl_test.max_attempts
+                            derived_test.show_correct_answers = tmpl_test.show_correct_answers
+                            derived_test.show_feedback = tmpl_test.show_feedback
+                            derived_test.show_score_immediately = tmpl_test.show_score_immediately
+                            derived_test.save(update_fields=[
+                                'title', 'description', 'is_published', 'reveal_results_at', 'start_date', 'end_date',
+                                'time_limit_minutes', 'allow_multiple_attempts', 'max_attempts',
+                                'show_correct_answers', 'show_feedback', 'show_score_immediately'
+                            ])
+
+                            # Sync questions and options (same as sync_content)
+                            existing_questions = list(
+                                derived_test.questions.all())
+                            template_questions = list(
+                                tmpl_test.questions.all().order_by('position', 'id'))
+
+                            # Remove questions that no longer exist in template
+                            # BUT: Don't delete questions that have answers from completed attempts
+                            for existing_q in existing_questions:
+                                if not any(
+                                    tq.position == existing_q.position and tq.type == existing_q.type
+                                    for tq in template_questions
+                                ):
+                                    # Check if this question has answers from completed attempts
+                                    if has_completed_attempts:
+                                        has_answers = Answer.objects.filter(
+                                            question=existing_q,
+                                            attempt__test=derived_test,
+                                            attempt__submitted_at__isnull=False
+                                        ).exists()
+                                        if has_answers:
+                                            # Don't delete - preserve student answers
+                                            continue
+                                    existing_q.delete()
+
+                            for tq in template_questions:
+                                existing_q = derived_test.questions.filter(
+                                    position=tq.position,
+                                    type=tq.type
+                                ).first()
+
+                                if existing_q:
+                                    # Check if this question has answers from completed attempts
+                                    question_has_answers = False
+                                    if has_completed_attempts:
+                                        question_has_answers = Answer.objects.filter(
+                                            question=existing_q,
+                                            attempt__test=derived_test,
+                                            attempt__submitted_at__isnull=False
+                                        ).exists()
+
+                                    # Update existing question
+                                    existing_q.text = tq.text
+                                    existing_q.points = tq.points
+                                    # Only update correct_answer_text if no completed attempts
+                                    if not question_has_answers:
+                                        existing_q.correct_answer_text = tq.correct_answer_text
+                                    existing_q.sample_answer = tq.sample_answer
+                                    existing_q.key_words = tq.key_words
+                                    existing_q.matching_pairs_json = tq.matching_pairs_json
+
+                                    update_fields = [
+                                        'text', 'points', 'sample_answer', 'key_words', 'matching_pairs_json']
+                                    if not question_has_answers:
+                                        update_fields.append(
+                                            'correct_answer_text')
+
+                                    existing_q.save(
+                                        update_fields=update_fields)
+
+                                    existing_options = list(
+                                        existing_q.options.all())
+                                    template_options = list(
+                                        tq.options.all().order_by('position', 'id'))
+
+                                    # Check which options have answers
+                                    options_with_answers = set()
+                                    if question_has_answers:
+                                        options_with_answers = set(
+                                            Answer.objects.filter(
+                                                question=existing_q,
+                                                attempt__test=derived_test,
+                                                attempt__submitted_at__isnull=False
+                                            ).values_list('selected_options__id', flat=True)
+                                        )
+
+                                    # Remove options that no longer exist
+                                    # BUT: Don't delete options that have answers
+                                    for existing_opt in existing_options:
+                                        if not any(to.position == existing_opt.position for to in template_options):
+                                            if existing_opt.id in options_with_answers:
+                                                continue
+                                            existing_opt.delete()
+
+                                    for to in template_options:
+                                        existing_opt = existing_q.options.filter(
+                                            position=to.position).first()
+                                        if existing_opt:
+                                            # Update text and image (safe)
+                                            existing_opt.text = to.text
+                                            existing_opt.image_url = to.image_url
+
+                                            # Only update is_correct if this option has no answers
+                                            opt_has_answers = existing_opt.id in options_with_answers
+                                            if not opt_has_answers:
+                                                existing_opt.is_correct = to.is_correct
+                                                existing_opt.save(
+                                                    update_fields=['text', 'image_url', 'is_correct'])
+                                            else:
+                                                existing_opt.save(
+                                                    update_fields=['text', 'image_url'])
+                                        else:
+                                            Option.objects.create(
+                                                question=existing_q,
+                                                text=to.text,
+                                                image_url=to.image_url,
+                                                is_correct=to.is_correct,
+                                                position=to.position
+                                            )
+                                else:
+                                    new_q = Question.objects.create(
+                                        test=derived_test,
+                                        type=tq.type,
+                                        text=tq.text,
+                                        points=tq.points,
+                                        position=tq.position,
+                                        correct_answer_text=tq.correct_answer_text,
+                                        sample_answer=tq.sample_answer,
+                                        key_words=tq.key_words,
+                                        matching_pairs_json=tq.matching_pairs_json
+                                    )
+
+                                    for to in tq.options.all().order_by('position', 'id'):
+                                        Option.objects.create(
+                                            question=new_q,
+                                            text=to.text,
+                                            image_url=to.image_url,
+                                            is_correct=to.is_correct,
+                                            position=to.position
+                                        )
+                else:
+                    with transaction.atomic():
+                        new_test = Test.objects.create(
+                            course_section=derived_sec,
+                            teacher=tmpl_test.teacher,
+                            title=tmpl_test.title,
+                            description=tmpl_test.description,
+                            is_published=tmpl_test.is_published,  # Use template's published status
+                            reveal_results_at=tmpl_test.reveal_results_at,
+                            start_date=tmpl_test.start_date,
+                            end_date=tmpl_test.end_date,
+                            time_limit_minutes=tmpl_test.time_limit_minutes,
+                            allow_multiple_attempts=tmpl_test.allow_multiple_attempts,
+                            max_attempts=tmpl_test.max_attempts,
+                            show_correct_answers=tmpl_test.show_correct_answers,
+                            show_feedback=tmpl_test.show_feedback,
+                            show_score_immediately=tmpl_test.show_score_immediately,
+                            template_test=tmpl_test,
+                            is_unlinked_from_template=False
+                        )
+                        synced_tests += 1
+
+                        for tq in tmpl_test.questions.all().order_by('position', 'id'):
+                            new_q = Question.objects.create(
+                                test=new_test,
+                                type=tq.type,
+                                text=tq.text,
+                                points=tq.points,
+                                position=tq.position,
+                                correct_answer_text=tq.correct_answer_text,
+                                sample_answer=tq.sample_answer,
+                                key_words=tq.key_words,
+                                matching_pairs_json=tq.matching_pairs_json
+                            )
+
+                            for to in tq.options.all().order_by('position', 'id'):
+                                Option.objects.create(
+                                    question=new_q,
+                                    text=to.text,
+                                    image_url=to.image_url,
+                                    is_correct=to.is_correct,
+                                    position=to.position
+                                )
+
+        return Response({
+            "detail": f"Content synced successfully to subject group. "
+            f"Created/updated {synced_sections} section(s), synced {synced_resources[0]} resource(s), "
+            f"{synced_assignments} assignment(s), and {synced_tests} test(s)."
+        }, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['get'], url_path='members')
     def members(self, request, pk=None):
@@ -523,6 +1424,26 @@ class CourseSectionViewSet(viewsets.ModelViewSet):
                     subject_group__isnull=False, course__isnull=True)
 
         return queryset
+
+    def get_object(self):
+        """
+        Override get_object to ensure template sections can be accessed by ID
+        even when is_template filter is not set.
+        """
+        # For retrieve/update/delete operations, use base queryset to avoid filtering issues
+        if self.action in ['retrieve', 'update', 'partial_update', 'destroy']:
+            # Use base queryset without filters for these operations
+            queryset = CourseSection.objects.all()
+            lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+            filter_kwargs = {self.lookup_field: self.kwargs[lookup_url_kwarg]}
+            obj = queryset.get(**filter_kwargs)
+
+            # Check permissions
+            self.check_object_permissions(self.request, obj)
+            return obj
+
+        # For other operations, use the filtered queryset
+        return super().get_object()
 
     @action(detail=False, methods=['patch'], url_path='change-items-order')
     def change_items_order(self, request):

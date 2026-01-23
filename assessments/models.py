@@ -13,7 +13,8 @@ class QuestionType(models.TextChoices):
 
 class Test(models.Model):
     course_section = models.ForeignKey(
-        "courses.CourseSection", on_delete=models.CASCADE, related_name="tests")
+        "courses.CourseSection", on_delete=models.CASCADE, related_name="tests", null=True, blank=True,
+        help_text="Course section for this test. Can be null for template tests not tied to a specific section.")
     teacher = models.ForeignKey(
         "users.User", on_delete=models.CASCADE, related_name="tests")
     title = models.CharField(max_length=255)
@@ -43,6 +44,20 @@ class Test(models.Model):
     show_correct_answers = models.BooleanField(default=True)
     show_feedback = models.BooleanField(default=True)
     show_score_immediately = models.BooleanField(default=False)
+
+    # Template link (similar to Resource and Assignment)
+    template_test = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="derived_tests",
+        help_text="Template test this test was cloned from (if any).",
+    )
+    is_unlinked_from_template = models.BooleanField(
+        default=False,
+        help_text="If true, this test is no longer auto-synced from its template.",
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

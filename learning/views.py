@@ -587,6 +587,107 @@ class AssignmentViewSet(viewsets.ModelViewSet):
             'message': 'outdated' if is_outdated else ('unlinked' if is_unlinked else 'synced')
         })
 
+    @action(detail=True, methods=['post'], url_path='sync-from-template')
+    def sync_from_template(self, request, pk=None):
+        """
+        Sync this assignment with its template.
+        Only available for superadmins.
+        """
+        from schools.permissions import IsSuperAdmin
+        from django.utils import timezone
+        from datetime import timedelta, datetime
+        
+        if not IsSuperAdmin().has_permission(request, self):
+            return Response(
+                {'error': 'Only superadmins can sync individual assignments'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        assignment = self.get_object()
+        
+        if not assignment.template_assignment:
+            return Response(
+                {'error': 'Assignment is not linked to any template'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if assignment.is_unlinked_from_template:
+            return Response(
+                {'error': 'Assignment is unlinked from template and cannot be synced'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        template = assignment.template_assignment
+        derived_sec = assignment.course_section
+        
+        # Calculate due_at based on template-relative fields if available
+        due_at = template.due_at
+        if (
+            derived_sec.start_date
+            and template.template_offset_days_from_section_start is not None
+            and template.template_due_time is not None
+        ):
+            due_date = derived_sec.start_date + timedelta(
+                days=template.template_offset_days_from_section_start
+            )
+            due_at = datetime.combine(
+                due_date,
+                template.template_due_time,
+                tzinfo=timezone.get_current_timezone(),
+            )
+        
+        # Update assignment fields from template
+        assignment.title = template.title
+        assignment.description = template.description
+        assignment.due_at = due_at
+        assignment.max_grade = template.max_grade
+        if template.file:
+            assignment.file = template.file
+        assignment.save(update_fields=[
+            'title', 'description', 'due_at', 'max_grade', 'file'
+        ])
+        
+        # Sync attachments
+        existing_attachments = list(assignment.attachments.all())
+        template_attachments = list(template.attachments.all().order_by("position", "id"))
+        
+        # Remove attachments that no longer exist in template
+        for existing_att in existing_attachments:
+            if not any(
+                ta.position == existing_att.position and
+                ta.type == existing_att.type
+                for ta in template_attachments
+            ):
+                existing_att.delete()
+        
+        # Create or update attachments
+        for att in template_attachments:
+            existing_att = assignment.attachments.filter(
+                position=att.position,
+                type=att.type
+            ).first()
+            
+            if existing_att:
+                existing_att.title = att.title
+                existing_att.content = att.content
+                existing_att.file_url = att.file_url
+                if att.file and not existing_att.file:
+                    existing_att.file = att.file
+                existing_att.save()
+            else:
+                AssignmentAttachment.objects.create(
+                    assignment=assignment,
+                    type=att.type,
+                    title=att.title,
+                    content=att.content,
+                    file_url=att.file_url,
+                    file=att.file,
+                    position=att.position,
+                )
+        
+        serializer = self.get_serializer(assignment)
+        return Response(serializer.data)
+
 
 class AssignmentAttachmentViewSet(viewsets.ModelViewSet):
     queryset = AssignmentAttachment.objects.select_related('assignment').all()
