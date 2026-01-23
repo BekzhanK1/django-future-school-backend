@@ -99,28 +99,45 @@ class CourseViewSet(viewsets.ModelViewSet):
         def clone_resource_tree(template_res: Resource, target_section: CourseSection, parent: Resource | None):
             """
             Recursively clone a template resource and its children into target_section.
+            Updates existing resources if they are linked to the template.
             """
             # Check if a clone already exists for this template in this section
             existing = Resource.objects.filter(
                 course_section=target_section,
                 template_resource=template_res,
             ).first()
+
             if existing:
-                return existing
+                # Update existing resource if it's not unlinked from template
+                if not existing.is_unlinked_from_template:
+                    existing.type = template_res.type
+                    existing.title = template_res.title
+                    existing.description = template_res.description
+                    existing.url = template_res.url
+                    # Update file if template has a file (copy the file reference)
+                    if template_res.file:
+                        existing.file = template_res.file
+                    existing.position = template_res.position
+                    existing.save(update_fields=[
+                        'type', 'title', 'description', 'url', 'file', 'position'
+                    ])
 
-            clone = Resource.objects.create(
-                course_section=target_section,
-                parent_resource=parent,
-                template_resource=template_res,
-                type=template_res.type,
-                title=template_res.title,
-                description=template_res.description,
-                url=template_res.url,
-                file=template_res.file,
-                position=template_res.position,
-            )
+                clone = existing
+            else:
+                # Create new clone
+                clone = Resource.objects.create(
+                    course_section=target_section,
+                    parent_resource=parent,
+                    template_resource=template_res,
+                    type=template_res.type,
+                    title=template_res.title,
+                    description=template_res.description,
+                    url=template_res.url,
+                    file=template_res.file,
+                    position=template_res.position,
+                )
 
-            # Clone children
+            # Sync children (recursively)
             for child in template_res.children.all().order_by("position", "id"):
                 clone_resource_tree(child, target_section, clone)
 
@@ -192,32 +209,89 @@ class CourseViewSet(viewsets.ModelViewSet):
 
                 # Sync assignments: one-to-one mapping via template_assignment
                 tmpl_assignments = Assignment.objects.filter(
-                    course_section=tmpl_sec).order_by("due_at", "id")
+                    course_section=tmpl_sec,
+                    template_assignment__isnull=True,  # Only root template assignments
+                ).order_by("due_at", "id")
                 for tmpl_asg in tmpl_assignments:
-                    if tmpl_asg.template_assignment_id:
-                        # already a clone of something else; skip
-                        continue
                     derived_asg = Assignment.objects.filter(
                         course_section=derived_sec,
                         template_assignment=tmpl_asg,
                     ).first()
-                    if not derived_asg:
-                        # Calculate due_at based on template-relative fields if available
-                        due_at = tmpl_asg.due_at
-                        if (
-                            derived_sec.start_date
-                            and tmpl_asg.template_offset_days_from_section_start is not None
-                            and tmpl_asg.template_due_time is not None
-                        ):
-                            due_date = derived_sec.start_date + timedelta(
-                                days=tmpl_asg.template_offset_days_from_section_start
-                            )
-                            due_at = datetime.combine(
-                                due_date,
-                                tmpl_asg.template_due_time,
-                                tzinfo=timezone.get_current_timezone(),
-                            )
 
+                    # Calculate due_at based on template-relative fields if available
+                    due_at = tmpl_asg.due_at
+                    if (
+                        derived_sec.start_date
+                        and tmpl_asg.template_offset_days_from_section_start is not None
+                        and tmpl_asg.template_due_time is not None
+                    ):
+                        due_date = derived_sec.start_date + timedelta(
+                            days=tmpl_asg.template_offset_days_from_section_start
+                        )
+                        due_at = datetime.combine(
+                            due_date,
+                            tmpl_asg.template_due_time,
+                            tzinfo=timezone.get_current_timezone(),
+                        )
+
+                    if derived_asg:
+                        # Update existing assignment if it's not unlinked from template
+                        if not derived_asg.is_unlinked_from_template:
+                            derived_asg.title = tmpl_asg.title
+                            derived_asg.description = tmpl_asg.description
+                            derived_asg.due_at = due_at
+                            derived_asg.max_grade = tmpl_asg.max_grade
+                            # Update file if template has a file
+                            if tmpl_asg.file:
+                                derived_asg.file = tmpl_asg.file
+                            derived_asg.save(update_fields=[
+                                'title', 'description', 'due_at', 'max_grade', 'file'
+                            ])
+
+                            # Sync attachments: remove old ones and create new ones
+                            # (or update if they match by position/type)
+                            existing_attachments = list(
+                                derived_asg.attachments.all())
+                            template_attachments = list(
+                                tmpl_asg.attachments.all().order_by("position", "id"))
+
+                            # Remove attachments that no longer exist in template
+                            for existing_att in existing_attachments:
+                                if not any(
+                                    ta.position == existing_att.position and
+                                    ta.type == existing_att.type
+                                    for ta in template_attachments
+                                ):
+                                    existing_att.delete()
+
+                            # Create or update attachments
+                            for att in template_attachments:
+                                existing_att = derived_asg.attachments.filter(
+                                    position=att.position,
+                                    type=att.type
+                                ).first()
+
+                                if existing_att:
+                                    # Update existing attachment
+                                    existing_att.title = att.title
+                                    existing_att.content = att.content
+                                    existing_att.file_url = att.file_url
+                                    if att.file and not existing_att.file:
+                                        existing_att.file = att.file
+                                    existing_att.save()
+                                else:
+                                    # Create new attachment
+                                    AssignmentAttachment.objects.create(
+                                        assignment=derived_asg,
+                                        type=att.type,
+                                        title=att.title,
+                                        content=att.content,
+                                        file_url=att.file_url,
+                                        file=att.file,
+                                        position=att.position,
+                                    )
+                    else:
+                        # Create new assignment
                         derived_asg = Assignment.objects.create(
                             course_section=derived_sec,
                             template_assignment=tmpl_asg,

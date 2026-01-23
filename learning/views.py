@@ -161,6 +161,87 @@ class ResourceViewSet(viewsets.ModelViewSet):
         serializer = ResourceSerializer(resource, context={'request': request})
         return Response(serializer.data)
 
+    @action(detail=True, methods=['post'], url_path='unlink-from-template')
+    def unlink_from_template(self, request, pk=None):
+        """
+        Unlink this resource from its template so it will no longer be auto-synced.
+        """
+        resource = self.get_object()
+        resource.is_unlinked_from_template = True
+        resource.save(update_fields=['is_unlinked_from_template'])
+        serializer = ResourceSerializer(resource, context={'request': request})
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='relink-to-template')
+    def relink_to_template(self, request, pk=None):
+        """
+        Relink this resource to its template so it will be auto-synced again.
+        """
+        resource = self.get_object()
+        if not resource.template_resource:
+            return Response(
+                {'error': 'This resource is not linked to any template'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        resource.is_unlinked_from_template = False
+        resource.save(update_fields=['is_unlinked_from_template'])
+        serializer = ResourceSerializer(resource, context={'request': request})
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['get'], url_path='sync-status')
+    def sync_status(self, request, pk=None):
+        """
+        Check if resource is in sync with its template.
+        Returns sync status for admin users.
+        """
+        resource = self.get_object()
+        
+        if not resource.template_resource:
+            return Response({
+                'is_linked': False,
+                'is_unlinked': False,
+                'is_outdated': False,
+                'message': 'Resource is not linked to any template'
+            })
+        
+        template = resource.template_resource
+        is_unlinked = resource.is_unlinked_from_template
+        
+        # Check if resource is outdated (compare key fields with template)
+        is_outdated = False
+        outdated_fields = []
+        
+        if not is_unlinked:
+            if resource.title != template.title:
+                is_outdated = True
+                outdated_fields.append('title')
+            if resource.description != template.description:
+                is_outdated = True
+                outdated_fields.append('description')
+            if resource.url != template.url:
+                is_outdated = True
+                outdated_fields.append('url')
+            if resource.type != template.type:
+                is_outdated = True
+                outdated_fields.append('type')
+            # Check file - compare file names/paths
+            if template.file and resource.file:
+                if str(template.file) != str(resource.file):
+                    is_outdated = True
+                    outdated_fields.append('file')
+            elif template.file and not resource.file:
+                is_outdated = True
+                outdated_fields.append('file')
+        
+        return Response({
+            'is_linked': True,
+            'is_unlinked': is_unlinked,
+            'is_outdated': is_outdated,
+            'outdated_fields': outdated_fields,
+            'template_id': template.id,
+            'message': 'outdated' if is_outdated else ('unlinked' if is_unlinked else 'synced')
+        })
+
     @action(detail=False, methods=['post'], url_path='create-directory-with-files')
     def create_directory_with_files(self, request):
         """
@@ -427,6 +508,84 @@ class AssignmentViewSet(viewsets.ModelViewSet):
             permission_classes = [RoleBasedPermission]
         
         return [permission() for permission in permission_classes]
+
+    @action(detail=True, methods=['post'], url_path='unlink-from-template')
+    def unlink_from_template(self, request, pk=None):
+        """
+        Unlink this assignment from its template so it will no longer be auto-synced.
+        """
+        assignment = self.get_object()
+        assignment.is_unlinked_from_template = True
+        assignment.save(update_fields=['is_unlinked_from_template'])
+        serializer = AssignmentSerializer(assignment, context={'request': request})
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='relink-to-template')
+    def relink_to_template(self, request, pk=None):
+        """
+        Relink this assignment to its template so it will be auto-synced again.
+        """
+        assignment = self.get_object()
+        if not assignment.template_assignment:
+            return Response(
+                {'error': 'This assignment is not linked to any template'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        assignment.is_unlinked_from_template = False
+        assignment.save(update_fields=['is_unlinked_from_template'])
+        serializer = AssignmentSerializer(assignment, context={'request': request})
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['get'], url_path='sync-status')
+    def sync_status(self, request, pk=None):
+        """
+        Check if assignment is in sync with its template.
+        Returns sync status for admin users.
+        """
+        assignment = self.get_object()
+        
+        if not assignment.template_assignment:
+            return Response({
+                'is_linked': False,
+                'is_unlinked': False,
+                'is_outdated': False,
+                'message': 'Assignment is not linked to any template'
+            })
+        
+        template = assignment.template_assignment
+        is_unlinked = assignment.is_unlinked_from_template
+        
+        # Check if assignment is outdated (compare key fields with template)
+        is_outdated = False
+        outdated_fields = []
+        
+        if not is_unlinked:
+            if assignment.title != template.title:
+                is_outdated = True
+                outdated_fields.append('title')
+            if assignment.description != template.description:
+                is_outdated = True
+                outdated_fields.append('description')
+            if assignment.max_grade != template.max_grade:
+                is_outdated = True
+                outdated_fields.append('max_grade')
+            # Check file - compare file names/paths
+            if template.file and assignment.file:
+                if str(template.file) != str(assignment.file):
+                    is_outdated = True
+                    outdated_fields.append('file')
+            elif template.file and not assignment.file:
+                is_outdated = True
+                outdated_fields.append('file')
+        
+        return Response({
+            'is_linked': True,
+            'is_unlinked': is_unlinked,
+            'is_outdated': is_outdated,
+            'outdated_fields': outdated_fields,
+            'template_id': template.id,
+            'message': 'outdated' if is_outdated else ('unlinked' if is_unlinked else 'synced')
+        })
 
 
 class AssignmentAttachmentViewSet(viewsets.ModelViewSet):
