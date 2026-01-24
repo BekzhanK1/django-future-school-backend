@@ -164,6 +164,17 @@ class ForumPostViewSet(viewsets.ModelViewSet):
         return qs.none()
 
     def perform_create(self, serializer):
+        # Check if replies are allowed in this thread
+        from rest_framework import serializers as drf_serializers
+        thread_id = self.request.data.get('thread')
+        if thread_id:
+            try:
+                thread = ForumThread.objects.get(id=thread_id)
+                if not thread.allow_replies:
+                    raise drf_serializers.ValidationError("Replies are not allowed on this thread")
+            except ForumThread.DoesNotExist:
+                pass
+        
         serializer.save(author=self.request.user)
 
 

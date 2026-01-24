@@ -12,6 +12,9 @@ class QuestionType(models.TextChoices):
 
 
 class Test(models.Model):
+    course = models.ForeignKey(
+        "courses.Course", on_delete=models.CASCADE, related_name="tests", null=True, blank=True,
+        help_text="Course this test belongs to. Set for template tests, null for regular tests tied to sections.")
     course_section = models.ForeignKey(
         "courses.CourseSection", on_delete=models.CASCADE, related_name="tests", null=True, blank=True,
         help_text="Course section for this test. Can be null for template tests not tied to a specific section.")
@@ -224,6 +227,7 @@ class Answer(models.Model):
     # Feedback
     teacher_feedback = models.TextField(null=True, blank=True)
     auto_feedback = models.TextField(null=True, blank=True)
+    is_resolved = models.BooleanField(default=False, help_text="Whether this answer has been graded/resolved by teacher")
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

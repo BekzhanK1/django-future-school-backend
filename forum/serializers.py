@@ -5,6 +5,10 @@ from .models import ForumThread, ForumPost, ForumThreadType
 
 class ForumPostSerializer(serializers.ModelSerializer):
     author_username = serializers.CharField(source="author.username", read_only=True)
+    author_first_name = serializers.CharField(source="author.first_name", read_only=True)
+    author_last_name = serializers.CharField(source="author.last_name", read_only=True)
+    # Nested replies
+    replies = serializers.SerializerMethodField()
 
     class Meta:
         model = ForumPost
@@ -13,12 +17,21 @@ class ForumPostSerializer(serializers.ModelSerializer):
             "thread",
             "author",
             "author_username",
+            "author_first_name",
+            "author_last_name",
             "content",
             "is_answer",
+            "parent_post",
             "created_at",
             "updated_at",
+            "replies",
         ]
-        read_only_fields = ["id", "author", "created_at", "updated_at"]
+        read_only_fields = ["id", "author", "created_at", "updated_at", "replies"]
+
+    def get_replies(self, obj):
+        """Get nested replies to this post"""
+        replies = obj.replies.all()
+        return ForumPostSerializer(replies, many=True).data
 
 
 class ForumThreadSerializer(serializers.ModelSerializer):
@@ -38,6 +51,7 @@ class ForumThreadSerializer(serializers.ModelSerializer):
             "type",
             "is_public",
             "is_resolved",
+            "allow_replies",
             "created_at",
             "updated_at",
             "posts",
@@ -54,7 +68,7 @@ class ForumThreadCreateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ForumThread
-        fields = ["subject_group", "title", "type", "is_public", "initial_content"]
+        fields = ["subject_group", "title", "type", "is_public", "allow_replies", "initial_content"]
 
     def create(self, validated_data):
         request = self.context["request"]

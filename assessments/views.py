@@ -123,20 +123,12 @@ class TestViewSet(viewsets.ModelViewSet):
             if is_template_filter:
                 # Show template tests for courses the teacher teaches
                 teacher_courses = user.subject_groups.values_list('course', flat=True).distinct()
-                queryset = queryset.filter(
-                    Q(course_section__isnull=True) | 
-                    Q(course_section__course__in=teacher_courses,
-                      course_section__subject_group__isnull=True,
-                      course_section__course__isnull=False)
-                )
+                queryset = queryset.filter(course_id__in=teacher_courses)
                 # Filter by course if provided
                 course_id = self.request.query_params.get('course')
                 if course_id:
                     try:
-                        queryset = queryset.filter(
-                            Q(course_section__isnull=True) | 
-                            Q(course_section__course_id=int(course_id))
-                        )
+                        queryset = queryset.filter(course_id=int(course_id))
                     except (ValueError, TypeError):
                         pass
             else:
@@ -154,12 +146,7 @@ class TestViewSet(viewsets.ModelViewSet):
                 school_courses = Course.objects.filter(
                     subject_groups__classroom__school=user.school
                 ).distinct()
-                queryset = queryset.filter(
-                    Q(course_section__isnull=True) | 
-                    Q(course_section__course__in=school_courses,
-                      course_section__subject_group__isnull=True,
-                      course_section__course__isnull=False)
-                )
+                queryset = queryset.filter(course_id__in=school_courses)
             else:
                 queryset = queryset.filter(
                     course_section__subject_group__classroom__school=user.school,
@@ -172,21 +159,13 @@ class TestViewSet(viewsets.ModelViewSet):
         elif user.role == UserRole.SUPERADMIN:
             if is_template_filter:
                 # Show only template tests:
-                # - course_section is null (template test not tied to section)
-                # OR course_section.course is not null and subject_group is null (template section)
-                queryset = queryset.filter(
-                    Q(course_section__isnull=True) | 
-                    Q(course_section__subject_group__isnull=True, course_section__course__isnull=False)
-                )
+                # - tests with course set (template tests)
+                queryset = queryset.filter(course__isnull=False)
                 # Filter by course if provided
                 course_id = self.request.query_params.get('course')
                 if course_id:
                     try:
-                        # For template tests, filter by course if course_section exists
-                        queryset = queryset.filter(
-                            Q(course_section__isnull=True) | 
-                            Q(course_section__course_id=int(course_id))
-                        )
+                        queryset = queryset.filter(course_id=int(course_id))
                     except (ValueError, TypeError):
                         pass
             else:

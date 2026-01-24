@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.utils import timezone
 from .models import Test, Question, Option, Attempt, Answer, QuestionType
-from courses.models import CourseSection, SubjectGroup
+from courses.models import CourseSection, SubjectGroup, Course
 from users.models import UserRole
 
 
@@ -71,7 +71,7 @@ class TestSerializer(serializers.ModelSerializer):
     class Meta:
         model = Test
         fields = [
-            'id', 'course_section', 'teacher', 'title', 'description', 'is_published',
+            'id', 'course', 'course_section', 'teacher', 'title', 'description', 'is_published',
             'reveal_results_at', 'start_date', 'end_date', 'time_limit_minutes',
             'allow_multiple_attempts', 'max_attempts', 'show_correct_answers', 'show_feedback', 'show_score_immediately',
             'course_section_title', 'course_name', 'course_code', 'subject_group',
@@ -468,6 +468,12 @@ class NestedQuestionCreateSerializer(serializers.ModelSerializer):
 class CreateTestSerializer(serializers.ModelSerializer):
     # Use nested question serializer that doesn't require `test` field
     questions = NestedQuestionCreateSerializer(many=True, required=False)
+    course = serializers.PrimaryKeyRelatedField(
+        queryset=Course.objects.all(),
+        required=False,
+        allow_null=True,
+        help_text="Course for template tests"
+    )
     course_section = serializers.PrimaryKeyRelatedField(
         queryset=CourseSection.objects.all(),
         required=False,
@@ -482,7 +488,7 @@ class CreateTestSerializer(serializers.ModelSerializer):
     class Meta:
         model = Test
         fields = [
-            'course_section', 'subject_group', 'title', 'description', 'is_published',
+            'course', 'course_section', 'subject_group', 'title', 'description', 'is_published',
             'reveal_results_at', 'start_date', 'end_date', 'time_limit_minutes',
             'allow_multiple_attempts', 'max_attempts', 'show_correct_answers',
             'show_feedback', 'show_score_immediately', 'questions'

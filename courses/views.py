@@ -602,6 +602,156 @@ class SubjectGroupViewSet(viewsets.ModelViewSet):
             return [IsStudentOrTeacherOrAbove()]
         return super().get_permissions()
 
+    @action(detail=False, methods=['post'], url_path='bulk-create')
+    def bulk_create(self, request):
+        """
+        Bulk create SubjectGroups from combinations of courses, classrooms, and teachers.
+        Expected payload:
+        {
+            "course_ids": [1, 2, 3],
+            "classroom_ids": [1, 2, 3],
+            "teacher_ids": [1, 2, 3] (optional)
+        }
+        Creates all combinations: course × classroom × teacher (if provided)
+        """
+        from django.db import transaction
+        from schools.permissions import IsSuperAdmin
+
+        # Check permissions
+        if not IsSuperAdmin().has_permission(request, self):
+            return Response(
+                {'error': 'Only superadmins can bulk create subject groups'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        course_ids = request.data.get('course_ids', [])
+        classroom_ids = request.data.get('classroom_ids', [])
+        teacher_ids = request.data.get('teacher_ids', [])  # Optional
+
+        if not course_ids or not classroom_ids:
+            return Response(
+                {'error': 'course_ids and classroom_ids are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validate that courses and classrooms exist
+        from .models import Course
+        from schools.models import Classroom
+        from users.models import User, UserRole
+
+        courses = Course.objects.filter(id__in=course_ids)
+        if courses.count() != len(course_ids):
+            return Response(
+                {'error': 'Some course_ids are invalid'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        classrooms = Classroom.objects.filter(id__in=classroom_ids)
+        if classrooms.count() != len(classroom_ids):
+            return Response(
+                {'error': 'Some classroom_ids are invalid'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        teachers = None
+        if teacher_ids:
+            teachers = User.objects.filter(
+                id__in=teacher_ids, role=UserRole.TEACHER)
+            if teachers.count() != len(teacher_ids):
+                return Response(
+                    {'error': 'Some teacher_ids are invalid or not teachers'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        results = {
+            'created': [],
+            'skipped': [],
+            'errors': []
+        }
+
+        with transaction.atomic():
+            # Create all combinations
+            for course in courses:
+                for classroom in classrooms:
+                    # Check if SubjectGroup already exists (unique constraint: course + classroom)
+                    existing = SubjectGroup.objects.filter(
+                        course=course,
+                        classroom=classroom
+                    ).first()
+
+                    if existing:
+                        results['skipped'].append({
+                            'course_id': course.id,
+                            'course_name': course.name,
+                            'classroom_id': classroom.id,
+                            'classroom_display': str(classroom),
+                            'reason': 'SubjectGroup already exists'
+                        })
+                        continue
+
+                    # If teachers are provided, create one SubjectGroup per teacher
+                    # Otherwise, create one without teacher
+                    if teachers:
+                        for teacher in teachers:
+                            try:
+                                subject_group = SubjectGroup.objects.create(
+                                    course=course,
+                                    classroom=classroom,
+                                    teacher=teacher
+                                )
+                                results['created'].append({
+                                    'id': subject_group.id,
+                                    'course_id': course.id,
+                                    'course_name': course.name,
+                                    'classroom_id': classroom.id,
+                                    'classroom_display': str(classroom),
+                                    'teacher_id': teacher.id,
+                                    'teacher_username': teacher.username
+                                })
+                            except Exception as e:
+                                results['errors'].append({
+                                    'course_id': course.id,
+                                    'classroom_id': classroom.id,
+                                    'teacher_id': teacher.id,
+                                    'error': str(e)
+                                })
+                    else:
+                        # Create without teacher
+                        try:
+                            subject_group = SubjectGroup.objects.create(
+                                course=course,
+                                classroom=classroom,
+                                teacher=None
+                            )
+                            results['created'].append({
+                                'id': subject_group.id,
+                                'course_id': course.id,
+                                'course_name': course.name,
+                                'classroom_id': classroom.id,
+                                'classroom_display': str(classroom),
+                                'teacher_id': None,
+                                'teacher_username': None
+                            })
+                        except Exception as e:
+                            results['errors'].append({
+                                'course_id': course.id,
+                                'classroom_id': classroom.id,
+                                'teacher_id': None,
+                                'error': str(e)
+                            })
+
+        return Response({
+            'success': True,
+            'summary': {
+                'created_count': len(results['created']),
+                'skipped_count': len(results['skipped']),
+                'errors_count': len(results['errors'])
+            },
+            'created': results['created'],
+            'skipped': results['skipped'],
+            'errors': results['errors']
+        }, status=status.HTTP_201_CREATED)
+
     @action(detail=True, methods=['get'], url_path='sync-status')
     def sync_status(self, request, pk=None):
         """

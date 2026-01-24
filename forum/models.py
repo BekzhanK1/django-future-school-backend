@@ -31,6 +31,9 @@ class ForumThread(models.Model):
     # If False → private: visible only to author student + subject_group teacher + admins
     is_public = models.BooleanField(default=True)
     is_resolved = models.BooleanField(default=False)
+    # For announcements: whether replies are allowed
+    allow_replies = models.BooleanField(
+        default=True, help_text="Whether students can reply to this thread")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -43,7 +46,7 @@ class ForumThread(models.Model):
 
 class ForumPost(models.Model):
     """
-    Posts inside a thread (question text, answers, follow-ups).
+    Posts inside a thread (questions, answers, comments).
     """
 
     thread = models.ForeignKey(
@@ -57,6 +60,15 @@ class ForumPost(models.Model):
     content = models.TextField()
     # For marking an official teacher answer (can be used in UI)
     is_answer = models.BooleanField(default=False)
+    # For nested replies (reply-to functionality)
+    parent_post = models.ForeignKey(
+        "self",
+        on_delete=models.CASCADE,
+        related_name="replies",
+        null=True,
+        blank=True,
+        help_text="Parent post if this is a reply"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -65,5 +77,3 @@ class ForumPost(models.Model):
 
     def __str__(self) -> str:
         return f"Post in thread {self.thread_id} by {self.author_id}"
-
-
