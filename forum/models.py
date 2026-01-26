@@ -9,6 +9,15 @@ class ForumThreadType(models.TextChoices):
     ANNOUNCEMENT = "announcement", "Announcement"
 
 
+class ReactionType(models.TextChoices):
+    THUMBS_UP = "👍", "Thumbs Up"
+    HEART = "❤️", "Heart"
+    LAUGHING = "😂", "Laughing"
+    SURPRISED = "😮", "Surprised"
+    SAD = "😢", "Sad"
+    FIRE = "🔥", "Fire"
+
+
 class ForumThread(models.Model):
     """
     Q/A + announcements per SubjectGroup (Piazza-style).
@@ -77,3 +86,29 @@ class ForumPost(models.Model):
 
     def __str__(self) -> str:
         return f"Post in thread {self.thread_id} by {self.author_id}"
+
+
+class PostReaction(models.Model):
+    """
+    Emoji reactions on forum posts (👍 ❤️ 😂 😮 😢 🔥).
+    """
+    post = models.ForeignKey(
+        ForumPost, on_delete=models.CASCADE, related_name="reactions"
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="forum_post_reactions",
+    )
+    reaction_type = models.CharField(
+        max_length=2,  # emoji is typically 2 chars
+        choices=ReactionType.choices,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at"]
+        unique_together = ("post", "user", "reaction_type")
+
+    def __str__(self) -> str:
+        return f"{self.user.username} reacted {self.reaction_type} on post {self.post_id}"

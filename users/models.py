@@ -68,6 +68,8 @@ class User(AbstractUser):
         limit_choices_to={"role": UserRole.STUDENT},
         help_text="For parent accounts: linked student children."
     )
+    # Track last activity for online/offline status
+    last_active = models.DateTimeField(null=True, blank=True, help_text="Last time user was active")
 
     objects = UserManager()
 
@@ -114,3 +116,8 @@ class PasswordResetToken(models.Model):
 
     def __str__(self) -> str:
         return f"PRT {self.user_id}"
+
+
+# Import Notification model from separate file for organization
+from .models_notifications import Notification, NotificationType  # noqa: E402
+

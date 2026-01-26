@@ -12,11 +12,12 @@ from learning.role_permissions import RoleBasedPermission
 from schools.models import ClassroomUser
 from users.models import UserRole
 
-from .models import ForumThread, ForumPost
+from .models import ForumThread, ForumPost, PostReaction
 from .serializers import (
     ForumThreadSerializer,
     ForumThreadCreateSerializer,
     ForumPostSerializer,
+    PostReactionSerializer,
 )
 
 
@@ -176,5 +177,67 @@ class ForumPostViewSet(viewsets.ModelViewSet):
                 pass
         
         serializer.save(author=self.request.user)
+
+    @extend_schema(
+        operation_id="forum_posts_add_reaction",
+        summary="Add or toggle emoji reaction on a post",
+        request=PostReactionSerializer,
+        responses={200: PostReactionSerializer, 400: OpenApiTypes.OBJECT, 404: OpenApiTypes.OBJECT},
+        tags=["Forum"],
+    )
+    @action(detail=True, methods=["post"], url_path="react")
+    def react(self, request, pk=None):
+        """Add or toggle an emoji reaction on a post."""
+        post = self.get_object()
+        reaction_type = request.data.get("reaction_type")
+
+        if not reaction_type:
+            return Response(
+                {"error": "reaction_type is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Toggle: if user already reacted with this emoji, remove it; otherwise add it
+        reaction, created = PostReaction.objects.get_or_create(
+            post=post, user=request.user, reaction_type=reaction_type
+        )
+
+        if not created:
+            # User already reacted, so remove it (toggle)
+            reaction.delete()
+            return Response(
+                {"message": "Reaction removed"},
+                status=status.HTTP_200_OK,
+            )
+
+        serializer = PostReactionSerializer(reaction)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @extend_schema(
+        operation_id="forum_posts_remove_reaction",
+        summary="Remove emoji reaction from a post",
+        request=None,
+        responses={200: OpenApiTypes.OBJECT, 404: OpenApiTypes.OBJECT},
+        tags=["Forum"],
+    )
+    @action(detail=True, methods=["delete"], url_path=r"react/(?P<reaction_type>[^/]+)")
+    def remove_reaction(self, request, pk=None, reaction_type=None):
+        """Remove a specific emoji reaction from a post."""
+        post = self.get_object()
+
+        try:
+            reaction = PostReaction.objects.get(
+                post=post, user=request.user, reaction_type=reaction_type
+            )
+            reaction.delete()
+            return Response(
+                {"message": "Reaction removed"},
+                status=status.HTTP_200_OK,
+            )
+        except PostReaction.DoesNotExist:
+            return Response(
+                {"error": "Reaction not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
 

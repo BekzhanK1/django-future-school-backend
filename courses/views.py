@@ -1451,6 +1451,8 @@ class SubjectGroupViewSet(viewsets.ModelViewSet):
                 'first_name': teacher.first_name,
                 'last_name': teacher.last_name,
                 'email': teacher.email,
+                'role': 'teacher',
+                'last_login': (teacher.last_active.isoformat() if teacher.last_active else None),
             }
 
         # Fetch students of the classroom
@@ -1466,6 +1468,8 @@ class SubjectGroupViewSet(viewsets.ModelViewSet):
                 'first_name': u.first_name,
                 'last_name': u.last_name,
                 'email': u.email,
+                'role': 'student',
+                'last_login': (u.last_active.isoformat() if u.last_active else None),
             })
 
         data = {

@@ -12,12 +12,14 @@ from .views import (
     CheckAccessView,
     ParentChildViewSet,
 )
+from .views_notifications import NotificationViewSet
 
 router = DefaultRouter()
 router.register(r'users', UserViewSet)
 router.register(r'auth-sessions', AuthSessionViewSet)
 router.register(r'password-reset-tokens', PasswordResetTokenViewSet)
 router.register(r'parent-child', ParentChildViewSet, basename='parent-child')
+router.register(r'notifications', NotificationViewSet, basename='notifications')
 
 urlpatterns = [
     path("auth/login/", LoginView.as_view(), name="token_obtain_pair"),
