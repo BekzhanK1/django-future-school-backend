@@ -303,21 +303,24 @@ class UserViewSet(ModelViewSet):
         """
         Allow:
         - Superadmins: full access
+        - Schooladmins: can list users (for event creation search), filtered by school
         - Authenticated users: can retrieve their own user object (for parents to see children)
         """
         if self.action in ['retrieve'] and self.request.user.is_authenticated:
             return [permissions.IsAuthenticated()]
+        if self.action == 'list':
+            return [IsSchoolAdminOrSuperAdmin()]
         return [IsSuperAdmin()]
     
     def get_queryset(self):
         queryset = super().get_queryset()
-        
+        user = self.request.user
+        if self.action == 'list' and user.role == UserRole.SCHOOLADMIN and user.school_id:
+            queryset = queryset.filter(school_id=user.school_id)
         # Filter for students without classrooms
         no_classroom = self.request.query_params.get('no_classroom')
         if no_classroom and no_classroom.lower() in ['true', '1', 'yes']:
-            # Get users who don't have any ClassroomUser entries
             queryset = queryset.filter(classroom_users__isnull=True)
-        
         return queryset
     
     def get_serializer_class(self):

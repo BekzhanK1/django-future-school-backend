@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import Resource, Assignment, AssignmentAttachment, Submission, SubmissionAttachment, Grade, Attendance, AttendanceRecord, Event
-from users.models import UserRole
+from users.models import UserRole, User
 
 
 class ResourceSerializer(serializers.ModelSerializer):
@@ -371,12 +371,49 @@ class AttendanceMetricsSerializer(serializers.Serializer):
 
 
 class EventSerializer(serializers.ModelSerializer):
+    subject_group_display = serializers.SerializerMethodField()
+    target_users = serializers.PrimaryKeyRelatedField(many=True, queryset=User.objects.all(), required=False)
+    target_users_details = serializers.SerializerMethodField()
+
     class Meta:
         model = Event
         fields = [
             'id', 'title', 'description', 'type', 'start_at', 'end_at', 'is_all_day', 'location',
-            'school', 'subject_group', 'course_section', 'created_by', 'created_at', 'updated_at'
+            'target_audience', 'school', 'subject_group', 'subject_group_display', 'course_section',
+            'target_users', 'target_users_details', 'created_by', 'created_at', 'updated_at'
         ]
+
+    def get_subject_group_display(self, obj):
+        if obj.subject_group:
+            return str(obj.subject_group.classroom)
+        return None
+
+    def get_target_users_details(self, obj):
+        return [
+            {
+                'id': u.id,
+                'username': u.username,
+                'first_name': u.first_name or '',
+                'last_name': u.last_name or '',
+            }
+            for u in obj.target_users.all()
+        ]
+
+    def create(self, validated_data):
+        target_users = validated_data.pop('target_users', [])
+        user = self.context['request'].user
+        if not validated_data.get('school') and user.school_id:
+            validated_data['school'] = user.school
+        event = super().create(validated_data)
+        event.target_users.set(target_users)
+        return event
+
+    def update(self, instance, validated_data):
+        target_users = validated_data.pop('target_users', None)
+        result = super().update(instance, validated_data)
+        if target_users is not None:
+            instance.target_users.set(target_users)
+        return result
 
 
 from datetime import date, datetime, time

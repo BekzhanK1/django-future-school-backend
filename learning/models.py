@@ -268,7 +268,17 @@ class AttendanceRecord(models.Model):
 class EventType(models.TextChoices):
     LESSON = "lesson", "Lesson"
     SCHOOL_EVENT = "school_event", "School Event"
+    MEETING = "meeting", "Meeting"
+    GATHERING = "gathering", "Gathering"
     OTHER = "other", "Other"
+
+
+class EventTargetAudience(models.TextChoices):
+    """Кому показывать событие: все, только учителя, класс, выбранные пользователи."""
+    ALL = "all", "All"
+    TEACHERS = "teachers", "Teachers"
+    CLASS = "class", "Class"
+    SPECIFIC = "specific", "Specific"
 
 
 class Event(models.Model):
@@ -281,10 +291,21 @@ class Event(models.Model):
     is_all_day = models.BooleanField(default=False)
     location = models.CharField(max_length=255, null=True, blank=True)
     
-    # Targeting
+    # Targeting: кто видит событие
+    target_audience = models.CharField(
+        max_length=32,
+        choices=EventTargetAudience.choices,
+        default=EventTargetAudience.ALL,
+    )
     school = models.ForeignKey("schools.School", on_delete=models.CASCADE, related_name="events", null=True, blank=True)
     subject_group = models.ForeignKey("courses.SubjectGroup", on_delete=models.CASCADE, related_name="events", null=True, blank=True)
     course_section = models.ForeignKey("courses.CourseSection", on_delete=models.CASCADE, related_name="events", null=True, blank=True)
+    target_users = models.ManyToManyField(
+        "users.User",
+        related_name="targeted_events",
+        blank=True,
+        help_text="Для target_audience=specific: кому показывать событие.",
+    )
     
     # Audit
     created_by = models.ForeignKey("users.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="created_events")
@@ -298,6 +319,7 @@ class Event(models.Model):
             models.Index(fields=["school", "start_at"]),
             models.Index(fields=["subject_group", "start_at"]),
             models.Index(fields=["course_section", "start_at"]),
+            models.Index(fields=["target_audience", "start_at"]),
         ]
     
     def __str__(self) -> str:

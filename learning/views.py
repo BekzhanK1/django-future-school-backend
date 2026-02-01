@@ -1152,11 +1152,13 @@ from .serializers import RecurringEventCreateSerializer
 
 
 class EventViewSet(viewsets.ModelViewSet):
-	queryset = Event.objects.select_related('school', 'subject_group__course', 'subject_group__classroom__school', 'course_section__subject_group__course').all()
+	queryset = Event.objects.select_related(
+		'school', 'subject_group__course', 'subject_group__classroom__school', 'course_section__subject_group__course', 'created_by'
+	).prefetch_related('target_users').all()
 	serializer_class = EventSerializer
 	permission_classes = [RoleBasedPermission]
 	filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-	filterset_fields = ['type', 'school', 'subject_group', 'course_section']
+	filterset_fields = ['type', 'school', 'subject_group', 'course_section', 'target_audience']
 	search_fields = ['title', 'description']
 	ordering_fields = ['start_at', 'end_at', 'title']
 	ordering = ['start_at', 'id']
@@ -1166,26 +1168,25 @@ class EventViewSet(viewsets.ModelViewSet):
 		user = self.request.user
 		
 		if user.role == UserRole.STUDENT:
-			# Students: events for their school and their subject groups
 			student_school = user.school
 			student_subject_groups = user.classroom_users.values_list('classroom__subject_groups', flat=True)
 			queryset = queryset.filter(
-				Q(school=student_school) |
-				Q(subject_group__in=student_subject_groups)
+				Q(school=student_school, target_audience='all') |
+				Q(subject_group__in=student_subject_groups) |
+				Q(target_users=user)
 			)
 		elif user.role == UserRole.TEACHER:
-			# Teachers: events for their school and subject groups they teach
 			teacher_school = user.school
 			teacher_subject_groups = user.subject_groups.values_list('id', flat=True)
 			queryset = queryset.filter(
-				Q(school=teacher_school) |
-				Q(subject_group__in=teacher_subject_groups)
+				Q(school=teacher_school) & (Q(target_audience='all') | Q(target_audience='teachers')) |
+				Q(subject_group__in=teacher_subject_groups) |
+				Q(target_users=user)
 			)
 		elif user.role == UserRole.SCHOOLADMIN:
 			queryset = queryset.filter(school=user.school)
 		# Superadmin: all
 		
-		# Optional date range filtering
 		start_date = self.request.query_params.get('start_date')
 		end_date = self.request.query_params.get('end_date')
 		if start_date:
@@ -1193,11 +1194,16 @@ class EventViewSet(viewsets.ModelViewSet):
 		if end_date:
 			queryset = queryset.filter(start_at__date__lte=end_date)
 		
-		return queryset
+		return queryset.distinct()
 	
+	def get_permissions(self):
+		if self.action in ['create', 'update', 'partial_update', 'destroy']:
+			return [IsSchoolAdminOrSuperAdmin()]
+		return [RoleBasedPermission()]
+
 	def perform_create(self, serializer):
 		serializer.save(created_by=self.request.user)
-	
+
 	@action(detail=False, methods=['post'], url_path='create-recurring')
 	def create_recurring(self, request):
 		serializer = RecurringEventCreateSerializer(data=request.data)
