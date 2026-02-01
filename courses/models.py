@@ -7,11 +7,13 @@ class Course(models.Model):
     name = models.CharField(max_length=255)
     description = models.TextField(null=True, blank=True)
     grade = models.PositiveSmallIntegerField()
-    language = models.CharField(max_length=50, default='kazakh', help_text="Language of instruction (e.g., 'kazakh', 'russian', 'english')")
+    language = models.CharField(max_length=50, default='kazakh',
+                                help_text="Language of instruction (e.g., 'kazakh', 'russian', 'english')")
 
     class Meta:
         constraints = [
-            models.CheckConstraint(check=models.Q(grade__gte=0) & models.Q(grade__lte=12), name="check_course_grade_range"),
+            models.CheckConstraint(check=models.Q(grade__gte=0) & models.Q(
+                grade__lte=12), name="check_course_grade_range"),
         ]
 
     def __str__(self) -> str:
@@ -19,14 +21,18 @@ class Course(models.Model):
 
 
 class SubjectGroup(models.Model):
-    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name="subject_groups")
-    classroom = models.ForeignKey("schools.Classroom", on_delete=models.CASCADE, related_name="subject_groups")
-    teacher = models.ForeignKey("users.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="subject_groups")
+    course = models.ForeignKey(
+        Course, on_delete=models.CASCADE, related_name="subject_groups")
+    classroom = models.ForeignKey(
+        "schools.Classroom", on_delete=models.CASCADE, related_name="subject_groups")
+    teacher = models.ForeignKey("users.User", on_delete=models.SET_NULL,
+                                null=True, blank=True, related_name="subject_groups")
     external_id = models.CharField(max_length=255, null=True, blank=True)
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=["course", "classroom"], name="uq_course_classroom"),
+            models.UniqueConstraint(
+                fields=["course", "classroom"], name="uq_course_classroom"),
         ]
 
     def save(self, *args, **kwargs):
@@ -78,6 +84,15 @@ class CourseSection(models.Model):
     start_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
 
+    # Quarter: 1, 2, 3, 4, or null for all quarters
+    quarter = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        choices=[(1, '1 четверть'), (2, '2 четверть'),
+                 (3, '3 четверть'), (4, '4 четверть')],
+        help_text="Quarter this section belongs to (null = all quarters or general section)"
+    )
+
     # Template-relative scheduling (used only when this is a template section for a Course)
     template_week_index = models.IntegerField(
         null=True,
@@ -110,13 +125,18 @@ class CourseSection(models.Model):
         # Auto-increment position within subject_group or course (for templates)
         if not self.position or self.position == 0:
             if self.subject_group:
-                siblings = CourseSection.objects.filter(subject_group=self.subject_group)
+                siblings = CourseSection.objects.filter(
+                    subject_group=self.subject_group)
             else:
-                siblings = CourseSection.objects.filter(course=self.course, subject_group__isnull=True)
-            max_pos = siblings.aggregate(models.Max("position"))["position__max"] or 0
+                siblings = CourseSection.objects.filter(
+                    course=self.course, subject_group__isnull=True)
+            max_pos = siblings.aggregate(models.Max("position"))[
+                "position__max"] or 0
             self.position = max_pos + 1
         super().save(*args, **kwargs)
 
-from django.db import models
 
-# Create your models here.
+# Import schedule models
+from .models_schedule import ScheduleSlot, DayOfWeek  # noqa: F401
+# Import academic year models
+from .models_academic_year import AcademicYear, Holiday  # noqa: F401

@@ -2,7 +2,14 @@ from rest_framework import serializers
 from datetime import datetime, timedelta
 from django.utils import timezone
 from .models import Course, SubjectGroup, CourseSection
+from .models_schedule import ScheduleSlot, DayOfWeek
+from .models_academic_year import AcademicYear, Holiday
 from microsoft_graph.serializers import ShortOnlineMeetingSerializer
+
+
+class TimeFieldHHMM(serializers.TimeField):
+    """Accept time as HH:MM or HH:MM:SS."""
+    input_formats = ['%H:%M', '%H:%M:%S', '%H:%M:%S.%f']
 
 
 class CourseSerializer(serializers.ModelSerializer):
@@ -10,6 +17,90 @@ class CourseSerializer(serializers.ModelSerializer):
         model = Course
         fields = ['id', 'course_code', 'name',
                   'description', 'grade', 'language']
+
+
+class HolidaySerializer(serializers.ModelSerializer):
+    """Serializer for holidays"""
+    class Meta:
+        model = Holiday
+        fields = [
+            'id',
+            'academic_year',
+            'name',
+            'start_date',
+            'end_date',
+            'is_recurring',
+        ]
+
+
+class AcademicYearSerializer(serializers.ModelSerializer):
+    """Serializer for academic year"""
+    additional_holidays = HolidaySerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = AcademicYear
+        fields = [
+            'id',
+            'name',
+            'start_date',
+            'end_date',
+            'quarter1_weeks',
+            'quarter2_weeks',
+            'quarter3_weeks',
+            'quarter4_weeks',
+            'autumn_holiday_start',
+            'autumn_holiday_end',
+            'winter_holiday_start',
+            'winter_holiday_end',
+            'spring_holiday_start',
+            'spring_holiday_end',
+            'is_active',
+            'additional_holidays',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class ScheduleSlotSerializer(serializers.ModelSerializer):
+    """Serializer for schedule slots"""
+    start_time = TimeFieldHHMM()
+    end_time = TimeFieldHHMM()
+    day_of_week_display = serializers.CharField(source='get_day_of_week_display', read_only=True)
+    subject_group_course_name = serializers.CharField(
+        source='subject_group.course.name', read_only=True
+    )
+    subject_group_classroom_display = serializers.CharField(
+        source='subject_group.classroom.__str__', read_only=True
+    )
+    subject_group_teacher_fullname = serializers.CharField(
+        source='subject_group.teacher.get_full_name', read_only=True
+    )
+    subject_group_teacher_username = serializers.CharField(
+        source='subject_group.teacher.username', read_only=True
+    )
+    
+    class Meta:
+        model = ScheduleSlot
+        fields = [
+            'id',
+            'subject_group',
+            'subject_group_course_name',
+            'subject_group_classroom_display',
+            'subject_group_teacher_fullname',
+            'subject_group_teacher_username',
+            'day_of_week',
+            'day_of_week_display',
+            'start_time',
+            'end_time',
+            'room',
+            'start_date',
+            'end_date',
+            'quarter',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
 
 
 class SubjectGroupSerializer(serializers.ModelSerializer):
@@ -26,6 +117,7 @@ class SubjectGroupSerializer(serializers.ModelSerializer):
         source='teacher.email', read_only=True)
     external_id = serializers.CharField(read_only=True)
     online_meeting = serializers.SerializerMethodField()
+    schedule_slots = ScheduleSlotSerializer(many=True, read_only=True)
 
     def get_online_meeting(self, obj):
         online_meeting = getattr(obj, 'online_meeting', None)
@@ -36,7 +128,7 @@ class SubjectGroupSerializer(serializers.ModelSerializer):
     class Meta:
         model = SubjectGroup
         fields = ['id', 'course', 'classroom', 'teacher', 'course_name', 'course_code',
-                  'classroom_display', 'teacher_username', 'teacher_fullname', 'teacher_email', 'external_id', 'online_meeting', ]
+                  'classroom_display', 'teacher_username', 'teacher_fullname', 'teacher_email', 'external_id', 'online_meeting', 'schedule_slots']
 
 
 class CourseSectionSerializer(serializers.ModelSerializer):
@@ -58,6 +150,7 @@ class CourseSectionSerializer(serializers.ModelSerializer):
             'is_general',
             'start_date',
             'end_date',
+            'quarter',
             # Template-relative scheduling fields (meaningful for template sections)
             'template_week_index',
             'template_start_offset_days',

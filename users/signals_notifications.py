@@ -27,41 +27,48 @@ User = get_user_model()
 
 @receiver(post_save, sender=Assignment)
 def assignment_created_or_published(sender, instance, created, **kwargs):
-    """Notify students when a new assignment is created or published"""
-    if created and instance.is_available:
+    """Notify students when a new assignment is created"""
+    from django.utils import timezone
+
+    # Check if assignment is available (due_at is in the future or not set)
+    is_available = not instance.due_at or timezone.now() < instance.due_at
+
+    # Only notify for non-template assignments (subject_group must exist)
+    subject_group = instance.course_section.subject_group if instance.course_section else None
+    if not subject_group:
+        return  # Template assignment, skip notification
+
+    if created and is_available:
         # Get all students in the subject group
-        subject_group = instance.course_section.subject_group
-        if subject_group:
-            students = User.objects.filter(
-                classroom_users__classroom=subject_group.classroom,
-                role='student'
-            ).distinct()
-            
-            if students.exists() and subject_group.teacher:
-                notify_new_assignment(instance, list(students), subject_group.teacher)
-    
-    # If assignment becomes available after creation
-    elif not created and instance.is_available:
-        # Check if we already notified (simple check - could be improved)
-        # For now, we'll notify again if it becomes available
-        subject_group = instance.course_section.subject_group
-        if subject_group:
-            students = User.objects.filter(
-                classroom_users__classroom=subject_group.classroom,
-                role='student'
-            ).distinct()
-            
-            if students.exists() and subject_group.teacher:
-                # Only notify if no notification exists yet
-                from .models_notifications import Notification
-                existing = Notification.objects.filter(
-                    user__in=students,
-                    type='new_assignment',
-                    related_assignment=instance
-                ).exists()
-                
-                if not existing:
-                    notify_new_assignment(instance, list(students), subject_group.teacher)
+        students = User.objects.filter(
+            classroom_users__classroom=subject_group.classroom,
+            role='student'
+        ).distinct()
+
+        if students.exists() and subject_group.teacher:
+            notify_new_assignment(instance, list(
+                students), subject_group.teacher)
+
+    # If assignment becomes available after creation (due_at was changed to future)
+    elif not created and is_available:
+        # Check if we already notified
+        students = User.objects.filter(
+            classroom_users__classroom=subject_group.classroom,
+            role='student'
+        ).distinct()
+
+        if students.exists() and subject_group.teacher:
+            # Only notify if no notification exists yet
+            from .models_notifications import Notification
+            existing = Notification.objects.filter(
+                user__in=students,
+                type='new_assignment',
+                related_assignment=instance
+            ).exists()
+
+            if not existing:
+                notify_new_assignment(instance, list(
+                    students), subject_group.teacher)
 
 
 @receiver(post_save, sender=Submission)
@@ -89,10 +96,11 @@ def test_created_or_published(sender, instance, created, **kwargs):
                 classroom_users__classroom=subject_group.classroom,
                 role='student'
             ).distinct()
-            
+
             if students.exists() and subject_group.teacher:
-                notify_new_test(instance, list(students), subject_group.teacher)
-    
+                notify_new_test(instance, list(students),
+                                subject_group.teacher)
+
     # If test becomes published after creation
     elif not created and instance.is_published:
         subject_group = instance.course_section.subject_group if instance.course_section else None
@@ -101,7 +109,7 @@ def test_created_or_published(sender, instance, created, **kwargs):
                 classroom_users__classroom=subject_group.classroom,
                 role='student'
             ).distinct()
-            
+
             if students.exists() and subject_group.teacher:
                 from .models_notifications import Notification
                 existing = Notification.objects.filter(
@@ -109,9 +117,10 @@ def test_created_or_published(sender, instance, created, **kwargs):
                     type='new_test',
                     related_test=instance
                 ).exists()
-                
+
                 if not existing:
-                    notify_new_test(instance, list(students), subject_group.teacher)
+                    notify_new_test(instance, list(students),
+                                    subject_group.teacher)
 
 
 @receiver(post_save, sender=Attempt)

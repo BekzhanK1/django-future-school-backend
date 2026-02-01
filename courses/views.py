@@ -3,10 +3,13 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from .models import Course, SubjectGroup, CourseSection
+from .models_schedule import ScheduleSlot
+from .models_academic_year import AcademicYear, Holiday
 from .serializers import (
     CourseSerializer, SubjectGroupSerializer, CourseSectionSerializer,
+    ScheduleSlotSerializer, AcademicYearSerializer, HolidaySerializer,
     AutoCreateWeekSectionsSerializer, CourseFullSerializer
 )
 from schools.permissions import IsSuperAdmin, IsSchoolAdminOrSuperAdmin, IsTeacherOrAbove
@@ -1625,3 +1628,151 @@ class CourseSectionViewSet(viewsets.ModelViewSet):
             response_serializer = CourseSectionSerializer(sections, many=True)
             return Response(response_serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class AcademicYearViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing academic years.
+    """
+    queryset = AcademicYear.objects.prefetch_related(
+        'additional_holidays').all()
+    serializer_class = AcademicYearSerializer
+    permission_classes = [IsSuperAdmin]
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields = ['is_active']
+    ordering_fields = ['start_date']
+    ordering = ['-start_date']
+
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
+    def current(self, request):
+        """Get the current active academic year (available to all authenticated users)"""
+        try:
+            academic_year = AcademicYear.objects.get(is_active=True)
+            serializer = self.get_serializer(academic_year)
+            return Response(serializer.data)
+        except AcademicYear.DoesNotExist:
+            return Response(
+                {'error': 'No active academic year found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+
+class HolidayViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing holidays.
+    """
+    queryset = Holiday.objects.all()
+    serializer_class = HolidaySerializer
+    permission_classes = [IsSuperAdmin]
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields = ['academic_year', 'is_recurring']
+    ordering_fields = ['start_date']
+    ordering = ['start_date']
+
+
+class ScheduleSlotViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing schedule slots (lesson times) for SubjectGroups.
+    """
+    queryset = ScheduleSlot.objects.select_related(
+        'subject_group__course',
+        'subject_group__classroom'
+    ).all()
+    serializer_class = ScheduleSlotSerializer
+    permission_classes = [RoleBasedPermission]
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields = ['subject_group', 'day_of_week']
+    ordering_fields = ['day_of_week', 'start_time']
+    ordering = ['day_of_week', 'start_time']
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        user = self.request.user
+
+        # Students can see schedule slots for their classrooms
+        if user.role == UserRole.STUDENT:
+            student_classrooms = user.classroom_users.values_list(
+                'classroom', flat=True)
+            if student_classrooms:
+                queryset = queryset.filter(
+                    subject_group__classroom__in=student_classrooms)
+            else:
+                # If student has no classrooms, return empty queryset
+                queryset = queryset.none()
+        # Teachers can see schedule slots for their subject groups
+        elif user.role == UserRole.TEACHER:
+            queryset = queryset.filter(subject_group__teacher=user)
+        # School admins can see schedule slots for their school
+        elif user.role == UserRole.SCHOOLADMIN:
+            queryset = queryset.filter(
+                subject_group__classroom__school=user.school)
+        # Superadmins can see all schedule slots
+
+        return queryset.select_related(
+            'subject_group__course',
+            'subject_group__classroom',
+            'subject_group__teacher'
+        )
+
+    @action(detail=False, methods=['post'], url_path='copy-schedule')
+    def copy_schedule(self, request):
+        """
+        Copy schedule slots from one subject group to another.
+        Body: { "source_subject_group_id": <id>, "target_subject_group_id": <id> }
+        """
+        source_id = request.data.get('source_subject_group_id')
+        target_id = request.data.get('target_subject_group_id')
+
+        if not source_id or not target_id:
+            return Response(
+                {'error': 'Both source_subject_group_id and target_subject_group_id are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            source_slots = ScheduleSlot.objects.filter(
+                subject_group_id=source_id)
+            target_subject_group = SubjectGroup.objects.get(id=target_id)
+
+            # Check permissions
+            user = request.user
+            if user.role == UserRole.TEACHER:
+                if target_subject_group.teacher_id != user.id:
+                    return Response(
+                        {'error': 'Forbidden'},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+
+            # Delete existing slots for target
+            ScheduleSlot.objects.filter(subject_group_id=target_id).delete()
+
+            # Copy slots
+            new_slots = []
+            for slot in source_slots:
+                new_slots.append(ScheduleSlot(
+                    subject_group=target_subject_group,
+                    day_of_week=slot.day_of_week,
+                    start_time=slot.start_time,
+                    end_time=slot.end_time,
+                    room=slot.room,
+                    start_date=slot.start_date,
+                    end_date=slot.end_date,
+                ))
+
+            ScheduleSlot.objects.bulk_create(new_slots)
+
+            return Response({
+                'message': f'Copied {len(new_slots)} schedule slots',
+                'copied_count': len(new_slots)
+            }, status=status.HTTP_200_OK)
+
+        except SubjectGroup.DoesNotExist:
+            return Response(
+                {'error': 'Subject group not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
