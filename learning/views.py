@@ -10,12 +10,16 @@ from django.http import HttpResponse
 import zipfile
 import io
 import os
-from .models import Resource, Assignment, AssignmentAttachment, Submission, SubmissionAttachment, Grade, Attendance, AttendanceRecord, AttendanceStatus
+from .models import (
+    Resource, Assignment, AssignmentAttachment, Submission, SubmissionAttachment,
+    Grade, ManualGrade, GradeWeight, Attendance, AttendanceRecord, AttendanceStatus,
+)
 from .serializers import (
     ResourceSerializer, ResourceTreeSerializer, AssignmentSerializer, AssignmentAttachmentSerializer,
     SubmissionSerializer, SubmissionAttachmentSerializer, GradeSerializer, BulkGradeSerializer,
-    AttendanceSerializer, AttendanceCreateSerializer, AttendanceUpdateSerializer, 
-    StudentAttendanceHistorySerializer, AttendanceMetricsSerializer
+    ManualGradeSerializer, GradeWeightSerializer, GradeWeightBulkSerializer,
+    AttendanceSerializer, AttendanceCreateSerializer, AttendanceUpdateSerializer,
+    StudentAttendanceHistorySerializer, AttendanceMetricsSerializer,
 )
 from .role_permissions import RoleBasedPermission
 from schools.permissions import IsSuperAdmin, IsSchoolAdminOrSuperAdmin, IsTeacherOrAbove
@@ -941,6 +945,210 @@ class GradeViewSet(viewsets.ModelViewSet):
             response_serializer = GradeSerializer(grades, many=True)
             return Response(response_serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ManualGradeViewSet(viewsets.ModelViewSet):
+    queryset = ManualGrade.objects.select_related(
+        'student', 'subject_group', 'course_section', 'graded_by'
+    ).all()
+    serializer_class = ManualGradeSerializer
+    permission_classes = [RoleBasedPermission]
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields = ['student', 'subject_group', 'course_section', 'grade_type']
+    ordering_fields = ['graded_at', 'value']
+    ordering = ['-graded_at']
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        user = self.request.user
+        if user.role == UserRole.STUDENT:
+            queryset = queryset.filter(student=user)
+        elif user.role == UserRole.PARENT:
+            children_ids = user.children.filter(role=UserRole.STUDENT).values_list('id', flat=True)
+            queryset = queryset.filter(student_id__in=children_ids)
+        elif user.role == UserRole.TEACHER:
+            queryset = queryset.filter(subject_group__teacher=user)
+        elif user.role == UserRole.SCHOOLADMIN:
+            queryset = queryset.filter(subject_group__classroom__school=user.school)
+        return queryset
+
+    def perform_create(self, serializer):
+        serializer.save(graded_by=self.request.user)
+
+    @action(detail=False, methods=['get'], url_path='grade-book')
+    def grade_book(self, request):
+        """
+        Журнал оценок: задания + тесты + ручные оценки в одном списке.
+        Параметры: subject_group (обязателен), student_id (опционально — иначе все ученики группы).
+        """
+        from assessments.models import Test, Attempt
+
+        subject_group_id = request.query_params.get('subject_group')
+        student_id = request.query_params.get('student_id')
+        user = request.user
+
+        if not subject_group_id:
+            return Response(
+                {'error': 'subject_group is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            from courses.models import SubjectGroup
+            sg = SubjectGroup.objects.get(pk=subject_group_id)
+        except SubjectGroup.DoesNotExist:
+            return Response({'error': 'Subject group not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if user.role == UserRole.STUDENT:
+            if not sg.classroom.classroom_users.filter(user=user).exists():
+                return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+            student_ids = [user.id]
+        elif user.role == UserRole.PARENT:
+            children_ids = list(user.children.filter(role=UserRole.STUDENT).values_list('id', flat=True))
+            if not children_ids:
+                return Response({'results': []})
+            student_ids = list(
+                sg.classroom.classroom_users.filter(user_id__in=children_ids).values_list('user_id', flat=True)
+            )
+            if not student_ids:
+                return Response({'results': []})
+        elif user.role == UserRole.TEACHER:
+            if sg.teacher_id != user.id:
+                return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+            student_ids = list(
+                sg.classroom.classroom_users.filter(user__role=UserRole.STUDENT).values_list('user_id', flat=True)
+            ) if not student_id else [int(student_id)]
+        elif user.role == UserRole.SCHOOLADMIN:
+            if sg.classroom.school_id != user.school_id:
+                return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+            student_ids = list(
+                sg.classroom.classroom_users.filter(user__role=UserRole.STUDENT).values_list('user_id', flat=True)
+            ) if not student_id else [int(student_id)]
+        else:
+            student_ids = list(
+                sg.classroom.classroom_users.filter(user__role=UserRole.STUDENT).values_list('user_id', flat=True)
+            ) if not student_id else [int(student_id)]
+
+        section_ids = list(sg.sections.values_list('id', flat=True))
+        results = []
+
+        grades = Grade.objects.filter(
+            submission__student_id__in=student_ids,
+            submission__assignment__course_section_id__in=section_ids,
+        ).select_related('submission__assignment', 'submission__student', 'graded_by')
+        for g in grades:
+            sub = g.submission
+            asg = sub.assignment
+            results.append({
+                'source_type': 'assignment',
+                'source_id': asg.id,
+                'student_id': sub.student_id,
+                'student_username': sub.student.username,
+                'title': asg.title,
+                'value': g.grade_value,
+                'max_value': asg.max_grade,
+                'graded_at': g.graded_at,
+                'feedback': g.feedback,
+                'graded_by_username': g.graded_by.username,
+            })
+
+        attempts = Attempt.objects.filter(
+            student_id__in=student_ids,
+            test__course_section_id__in=section_ids,
+            is_completed=True,
+        ).select_related('test', 'student').prefetch_related('test__questions')
+        for a in attempts:
+            max_pts = a.max_score or (sum(q.points for q in a.test.questions.all()) if a.test.questions.exists() else 100)
+            if not max_pts:
+                max_pts = 100
+            results.append({
+                'source_type': 'test',
+                'source_id': a.test_id,
+                'student_id': a.student_id,
+                'student_username': a.student.username,
+                'title': a.test.title,
+                'value': a.score or 0,
+                'max_value': max_pts or 100,
+                'graded_at': a.submitted_at or a.started_at,
+                'feedback': None,
+                'graded_by_username': None,
+            })
+
+        manual = ManualGrade.objects.filter(
+            student_id__in=student_ids,
+            subject_group_id=sg.id,
+        ).select_related('student', 'graded_by')
+        for m in manual:
+            results.append({
+                'source_type': 'manual',
+                'source_id': m.id,
+                'student_id': m.student_id,
+                'student_username': m.student.username,
+                'title': m.title or m.get_grade_type_display(),
+                'value': m.value,
+                'max_value': m.max_value,
+                'graded_at': m.graded_at,
+                'feedback': m.feedback,
+                'graded_by_username': m.graded_by.username,
+                'grade_type': m.grade_type,
+            })
+
+        results.sort(key=lambda x: x['graded_at'] or timezone.now(), reverse=True)
+        return Response({'results': results})
+
+
+class GradeWeightViewSet(viewsets.ModelViewSet):
+    queryset = GradeWeight.objects.select_related('subject_group').all()
+    serializer_class = GradeWeightSerializer
+    permission_classes = [RoleBasedPermission]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['subject_group', 'source_type']
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        user = self.request.user
+        if user.role == UserRole.STUDENT:
+            queryset = queryset.filter(subject_group__classroom__classroom_users__user=user)
+        elif user.role == UserRole.PARENT:
+            children_ids = user.children.filter(role=UserRole.STUDENT).values_list('id', flat=True)
+            queryset = queryset.filter(subject_group__classroom__classroom_users__user_id__in=children_ids)
+        elif user.role == UserRole.TEACHER:
+            queryset = queryset.filter(subject_group__teacher=user)
+        elif user.role == UserRole.SCHOOLADMIN:
+            queryset = queryset.filter(subject_group__classroom__school=user.school)
+        return queryset.distinct()
+
+    @action(detail=False, methods=['post'], url_path='set-weights')
+    def set_weights(self, request):
+        """
+        Сохранить все три веса одним запросом (сумма должна быть 100%).
+        Тело: { "subject_group": id, "assignment": 0, "test": 30, "manual": 70 }.
+        """
+        serializer = GradeWeightBulkSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        data = serializer.validated_data
+        from courses.models import SubjectGroup
+        try:
+            subject_group = SubjectGroup.objects.select_related('classroom').get(pk=data['subject_group'])
+        except SubjectGroup.DoesNotExist:
+            return Response({'subject_group': ['Subject group not found.']}, status=status.HTTP_404_NOT_FOUND)
+        user = request.user
+        if user.role == UserRole.TEACHER and subject_group.teacher_id != user.id:
+            return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+        if user.role == UserRole.SCHOOLADMIN and subject_group.classroom.school_id != user.school_id:
+            return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+        from django.db import transaction
+        with transaction.atomic():
+            for source_type, weight in [('assignment', data['assignment']), ('test', data['test']), ('manual', data['manual'])]:
+                GradeWeight.objects.update_or_create(
+                    subject_group=subject_group,
+                    source_type=source_type,
+                    defaults={'weight': weight},
+                )
+        items = GradeWeight.objects.filter(subject_group=subject_group).order_by('source_type')
+        response_serializer = GradeWeightSerializer(items, many=True)
+        return Response(response_serializer.data, status=status.HTTP_200_OK)
 
 
 class AttendanceViewSet(viewsets.ModelViewSet):

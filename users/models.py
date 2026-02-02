@@ -70,6 +70,8 @@ class User(AbstractUser):
     )
     # Track last activity for online/offline status
     last_active = models.DateTimeField(null=True, blank=True, help_text="Last time user was active")
+    # Avatar key from predefined list (e.g. "1"-"8"); empty means show first letter of name
+    avatar = models.CharField(max_length=32, blank=True, null=True)
 
     objects = UserManager()
 

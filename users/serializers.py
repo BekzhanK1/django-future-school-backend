@@ -9,9 +9,9 @@ class UserSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'phone_number', 'role', 'is_active', 'kundelik_id', 'school', 'school_name', 'children', 'parents']
+        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'phone_number', 'role', 'is_active', 'kundelik_id', 'school', 'school_name', 'children', 'parents', 'avatar']
         read_only_fields = ['id', 'username']
-    
+
     def get_children(self, obj):
         """Get children (students) for parent users"""
         if obj.role == UserRole.PARENT:
@@ -37,6 +37,17 @@ class UserSerializer(serializers.ModelSerializer):
                 'last_name': parent.last_name,
             } for parent in parents]
         return []
+
+
+class ProfileUpdateSerializer(serializers.ModelSerializer):
+    """For authenticated user updating own profile: phone_number and avatar only."""
+    class Meta:
+        model = User
+        fields = ['phone_number', 'avatar']
+        extra_kwargs = {
+            'phone_number': {'required': False, 'allow_blank': True},
+            'avatar': {'required': False, 'allow_blank': True},
+        }
 
 
 class UserCreateSerializer(serializers.ModelSerializer):

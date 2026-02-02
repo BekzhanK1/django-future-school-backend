@@ -14,7 +14,8 @@ from rest_framework.decorators import action
 
 from .models import AuthSession, PasswordResetToken, User, UserRole
 from .serializers import (
-    UserSerializer, UserCreateSerializer, AuthSessionSerializer, PasswordResetTokenSerializer,
+    UserSerializer, UserCreateSerializer, ProfileUpdateSerializer,
+    AuthSessionSerializer, PasswordResetTokenSerializer,
     ParentChildSerializer, BulkParentChildSerializer
 )
 from .access_checker import AccessChecker
@@ -304,13 +305,26 @@ class UserViewSet(ModelViewSet):
         Allow:
         - Superadmins: full access
         - Schooladmins: can list users (for event creation search), filtered by school
-        - Authenticated users: can retrieve their own user object (for parents to see children)
+        - Authenticated users: can retrieve and partial_update their own user (profile)
         """
         if self.action in ['retrieve'] and self.request.user.is_authenticated:
             return [permissions.IsAuthenticated()]
+        if self.action in ['partial_update', 'update'] and self.request.user.is_authenticated:
+            pk = self.kwargs.get('pk')
+            if pk and str(self.request.user.id) == str(pk):
+                return [permissions.IsAuthenticated()]
         if self.action == 'list':
             return [IsSchoolAdminOrSuperAdmin()]
         return [IsSuperAdmin()]
+    
+    def get_serializer_class(self):
+        if self.action in ['partial_update', 'update'] and self.request.user.is_authenticated:
+            pk = self.kwargs.get('pk')
+            if pk and str(self.request.user.id) == str(pk):
+                return ProfileUpdateSerializer
+        if self.action == 'create':
+            return UserCreateSerializer
+        return UserSerializer
     
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -323,10 +337,17 @@ class UserViewSet(ModelViewSet):
             queryset = queryset.filter(classroom_users__isnull=True)
         return queryset
     
-    def get_serializer_class(self):
-        if self.action == 'create':
-            return UserCreateSerializer
-        return UserSerializer
+    def partial_update(self, request, *args, **kwargs):
+        """On self profile update, return full user so frontend can refresh."""
+        kwargs['partial'] = True
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        if str(request.user.id) == str(kwargs.get('pk')):
+            out_serializer = UserSerializer(instance)
+            return Response(out_serializer.data)
+        return Response(serializer.data)
     
     def create(self, request, *args, **kwargs):
         """Override create to return full user data with UserSerializer"""

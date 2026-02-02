@@ -1,4 +1,6 @@
 from django.db import models
+from django.utils import timezone
+from django.core.validators import MinValueValidator, MaxValueValidator
 
 
 class ResourceType(models.TextChoices):
@@ -187,8 +189,103 @@ class Grade(models.Model):
     feedback = models.TextField(null=True, blank=True)
     graded_at = models.DateTimeField(auto_now_add=True)
 
-from django.db import models
-from django.utils import timezone
+
+class ManualGradeType(models.TextChoices):
+    """Тип ручной оценки: за урок, контрольная оффлайн, устный ответ и т.д."""
+    LESSON = "lesson", "На уроке"
+    OFFLINE_TEST = "offline_test", "Контрольная работа (оффлайн)"
+    ORAL = "oral", "Устный ответ"
+    OTHER = "other", "Другое"
+
+
+class ManualGrade(models.Model):
+    """
+    Оценка, выставленная учителем вручную: за урок, за контрольную оффлайн,
+    за устный ответ и т.д. Не привязана к заданию или тесту в системе.
+    """
+    student = models.ForeignKey(
+        "users.User", on_delete=models.CASCADE, related_name="manual_grades"
+    )
+    subject_group = models.ForeignKey(
+        "courses.SubjectGroup", on_delete=models.CASCADE, related_name="manual_grades"
+    )
+    course_section = models.ForeignKey(
+        "courses.CourseSection",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="manual_grades",
+        help_text="Тема/раздел (опционально).",
+    )
+    value = models.PositiveIntegerField(help_text="Балл (например 5 или 85).")
+    max_value = models.PositiveIntegerField(
+        default=100,
+        help_text="Максимум баллов (5 для 5-балльной шкалы, 100 для 100-балльной).",
+    )
+    title = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Краткое название (например «Контрольная №2», «Ответ на уроке»).",
+    )
+    grade_type = models.CharField(
+        max_length=32,
+        choices=ManualGradeType.choices,
+        default=ManualGradeType.OTHER,
+    )
+    graded_by = models.ForeignKey(
+        "users.User", on_delete=models.CASCADE, related_name="given_manual_grades"
+    )
+    graded_at = models.DateTimeField(default=timezone.now)
+    feedback = models.TextField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-graded_at", "id"]
+        indexes = [
+            models.Index(fields=["student", "subject_group"]),
+            models.Index(fields=["subject_group", "graded_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.student.username}: {self.value}/{self.max_value} ({self.title or self.get_grade_type_display()})"
+
+
+class GradeWeightSourceType(models.TextChoices):
+    """Тип источника оценки для веса."""
+    ASSIGNMENT = "assignment", "Задание"
+    TEST = "test", "Тест"
+    MANUAL = "manual", "Ручная оценка"
+
+
+class GradeWeight(models.Model):
+    """
+    Вес типа оценки по предметной группе в процентах (0–100).
+    Сумма весов по трём типам (задание, тест, ручная) должна быть 100%.
+    """
+    subject_group = models.ForeignKey(
+        "courses.SubjectGroup", on_delete=models.CASCADE, related_name="grade_weights"
+    )
+    source_type = models.CharField(
+        max_length=32,
+        choices=GradeWeightSourceType.choices,
+        help_text="Тип оценки: задание, тест или ручная.",
+    )
+    weight = models.PositiveSmallIntegerField(
+        default=34,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        help_text="Вес в процентах (0–100). Сумма по трём типам = 100%.",
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["subject_group", "source_type"],
+                name="unique_subject_group_source_type",
+            ),
+        ]
+        ordering = ["subject_group", "source_type"]
+
+    def __str__(self):
+        return f"{self.subject_group} / {self.get_source_type_display()}: {self.weight}"
 
 
 class AttendanceStatus(models.TextChoices):

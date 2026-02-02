@@ -1,5 +1,8 @@
 from rest_framework import serializers
-from .models import Resource, Assignment, AssignmentAttachment, Submission, SubmissionAttachment, Grade, Attendance, AttendanceRecord, Event
+from .models import (
+    Resource, Assignment, AssignmentAttachment, Submission, SubmissionAttachment,
+    Grade, ManualGrade, ManualGradeType, GradeWeight, Attendance, AttendanceRecord, Event,
+)
 from users.models import UserRole, User
 
 
@@ -243,6 +246,76 @@ class BulkGradeSerializer(serializers.Serializer):
         except Submission.DoesNotExist:
             raise serializers.ValidationError("Submission does not exist")
         return value
+
+
+class ManualGradeSerializer(serializers.ModelSerializer):
+    student_username = serializers.CharField(source='student.username', read_only=True)
+    student_first_name = serializers.CharField(source='student.first_name', read_only=True)
+    student_last_name = serializers.CharField(source='student.last_name', read_only=True)
+    subject_group_display = serializers.SerializerMethodField()
+    course_section_title = serializers.CharField(source='course_section.title', read_only=True, allow_null=True)
+    graded_by_username = serializers.CharField(source='graded_by.username', read_only=True)
+    grade_type_display = serializers.CharField(source='get_grade_type_display', read_only=True)
+
+    def get_subject_group_display(self, obj):
+        return str(obj.subject_group) if obj.subject_group else None
+
+    class Meta:
+        model = ManualGrade
+        fields = [
+            'id', 'student', 'subject_group', 'course_section',
+            'value', 'max_value', 'title', 'grade_type', 'grade_type_display',
+            'graded_by', 'graded_at', 'feedback',
+            'student_username', 'student_first_name', 'student_last_name',
+            'subject_group_display', 'course_section_title', 'graded_by_username',
+        ]
+        read_only_fields = ['graded_at', 'graded_by']
+
+    def create(self, validated_data):
+        validated_data['graded_by'] = self.context['request'].user
+        return super().create(validated_data)
+
+
+class GradeWeightSerializer(serializers.ModelSerializer):
+    source_type_display = serializers.CharField(source='get_source_type_display', read_only=True)
+
+    class Meta:
+        model = GradeWeight
+        fields = ['id', 'subject_group', 'source_type', 'source_type_display', 'weight']
+
+    def validate(self, attrs):
+        subject_group_id = attrs.get('subject_group') or (self.instance and self.instance.subject_group_id)
+        source_type = attrs.get('source_type') or (self.instance and self.instance.source_type)
+        weight = attrs.get('weight')
+        if weight is None and self.instance:
+            weight = self.instance.weight
+        if subject_group_id is not None and weight is not None and source_type:
+            from .models import GradeWeight
+            current = dict(
+                GradeWeight.objects.filter(subject_group_id=subject_group_id).values_list('source_type', 'weight')
+            )
+            current[source_type] = weight
+            if set(current.keys()) == {'assignment', 'test', 'manual'} and sum(current.values()) != 100:
+                raise serializers.ValidationError(
+                    {'weight': 'Сумма весов по предмету должна быть 100%.'}
+                )
+        return attrs
+
+
+class GradeWeightBulkSerializer(serializers.Serializer):
+    """Сохранение всех трёх весов одним запросом (сумма должна быть 100%)."""
+    subject_group = serializers.IntegerField()
+    assignment = serializers.IntegerField(min_value=0, max_value=100)
+    test = serializers.IntegerField(min_value=0, max_value=100)
+    manual = serializers.IntegerField(min_value=0, max_value=100)
+
+    def validate(self, attrs):
+        total = attrs['assignment'] + attrs['test'] + attrs['manual']
+        if total != 100:
+            raise serializers.ValidationError(
+                {'assignment': 'Сумма весов по предмету должна быть 100%.'}
+            )
+        return attrs
 
 
 class AttendanceRecordSerializer(serializers.ModelSerializer):
