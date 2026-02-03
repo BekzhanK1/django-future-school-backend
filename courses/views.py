@@ -20,7 +20,8 @@ from users.models import UserRole
 class CourseViewSet(viewsets.ModelViewSet):
     queryset = Course.objects.all()
     serializer_class = CourseSerializer
-    permission_classes = [IsSuperAdmin]
+    # Управление шаблонами курсов: супер‑ и школьные админы
+    permission_classes = [IsSchoolAdminOrSuperAdmin]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['grade']
     search_fields = ['course_code', 'name', 'description']
@@ -595,6 +596,26 @@ class SubjectGroupViewSet(viewsets.ModelViewSet):
                      'classroom__letter', 'teacher__username']
     ordering_fields = ['course__name', 'classroom__grade', 'classroom__letter']
     ordering = ['course__name', 'classroom__grade', 'classroom__letter']
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        student_id = self.request.query_params.get('student')
+        if not student_id:
+            return queryset
+        user = self.request.user
+        try:
+            student_id = int(student_id)
+        except (TypeError, ValueError):
+            return queryset
+        if user.role == UserRole.STUDENT:
+            if user.id != student_id:
+                return queryset.none()
+        elif user.role == UserRole.PARENT:
+            if not user.children.filter(id=student_id, role=UserRole.STUDENT).exists():
+                return queryset.none()
+        return queryset.filter(
+            classroom__classroom_users__user_id=student_id
+        ).distinct()
 
     def get_permissions(self):
         # Keep SubjectGroup management for superadmins only, but allow role-based access to the

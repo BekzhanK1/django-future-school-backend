@@ -53,7 +53,8 @@ class LoginView(TokenObtainPairView):
         """Get comprehensive student data including courses, assignments, and grades"""
         from django.utils import timezone
         from datetime import timedelta
-        from learning.models import Assignment, Submission, Grade
+        from learning.models import Assignment, Submission, Grade, ManualGrade
+        from assessments.models import Attempt
         from courses.models import Course, SubjectGroup, CourseSection
         from schools.models import Classroom
         
@@ -167,12 +168,45 @@ class LoginView(TokenObtainPairView):
         submitted_assignments = Submission.objects.filter(student=user).count()
         
         graded_assignments = Grade.objects.filter(
-            submission__student=user
+        submission__student=user
         ).count()
         
-        # Calculate average grade if there are grades
-        grades = Grade.objects.filter(submission__student=user).values_list('grade_value', flat=True)
-        average_grade = sum(grades) / len(grades) if grades else None
+        # Calculate average grade the same way as parent overview / student-summary:
+        # per-subject average (0–100%), then overall = average of subject averages.
+        subject_averages = []
+        for sg in subject_groups:
+            percent_values = []
+            # Manual grades -> percent
+            manual_qs = ManualGrade.objects.filter(
+                student=user,
+                subject_group=sg,
+            )
+            for mg in manual_qs:
+                if mg.value is not None and mg.max_value:
+                    percent_values.append((mg.value / mg.max_value) * 100.0)
+            # Assignment grades -> percent of assignment.max_grade
+            grades_qs = Grade.objects.filter(
+                submission__student=user,
+                submission__assignment__course_section__subject_group_id=sg.id,
+            ).select_related('submission__assignment')
+            for g in grades_qs:
+                if g.grade_value is not None:
+                    assignment = getattr(g.submission, "assignment", None)
+                    max_grade = getattr(assignment, "max_grade", None) if assignment else None
+                    if max_grade:
+                        percent_values.append((g.grade_value / max_grade) * 100.0)
+            # Test attempts -> already percentage
+            attempts = Attempt.objects.filter(
+                student=user,
+                test__course_section__subject_group=sg,
+                is_completed=True,
+            )
+            percent_values.extend(
+                a.percentage for a in attempts if a.percentage is not None
+            )
+            if percent_values:
+                subject_averages.append(sum(percent_values) / len(percent_values))
+        average_grade = sum(subject_averages) / len(subject_averages) if subject_averages else None
         
         return {
             'classrooms': classroom_data,

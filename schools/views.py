@@ -97,12 +97,9 @@ class SchoolViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # Generate default password if not provided
-            if not default_password:
-                import secrets
-                import string
-                default_password = ''.join(secrets.choice(
-                    string.ascii_letters + string.digits) for _ in range(12))
+            # Default password for all created users
+            if not (default_password and str(default_password).strip()):
+                default_password = 'qwerty123'
 
             # Process rows
             results = {
@@ -212,9 +209,13 @@ class SchoolViewSet(viewsets.ModelViewSet):
     def import_students_excel(self, request, pk=None):
         """
         Import students from Excel file.
-        Expected columns: class_name, first_name, last_name, email (optional), phone_number (optional)
+        Expected columns: class_name, first_name, last_name, email (optional), phone_number (optional),
+        parent_username (optional, per row). If parent_username column is missing/empty, form field is used.
+        Optional form field: parent_username — default for rows without parent_username in Excel.
+        Query/body: preview=1 — only parse and return counts (no DB writes).
         """
         school = self.get_object()
+        is_preview = request.data.get('preview') in ('1', 'true', True)
 
         # Check if file is provided
         if 'file' not in request.FILES:
@@ -225,6 +226,7 @@ class SchoolViewSet(viewsets.ModelViewSet):
 
         excel_file = request.FILES['file']
         default_password = request.data.get('default_password', None)
+        default_parent_username = (request.data.get('parent_username') or '').strip() or None
 
         # Validate file extension
         if not excel_file.name.endswith(('.xlsx', '.xls')):
@@ -275,12 +277,113 @@ class SchoolViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # Generate default password if not provided
-            if not default_password:
-                import secrets
-                import string
-                default_password = ''.join(secrets.choice(
-                    string.ascii_letters + string.digits) for _ in range(12))
+            # Per-row parent: use column parent_username or form default
+            def row_parent_username(row, row_len):
+                if 'parent_username' in headers and headers['parent_username'] <= row_len and row[headers['parent_username'] - 1]:
+                    return str(row[headers['parent_username'] - 1]).strip() or default_parent_username
+                return default_parent_username
+
+            # Preview: parse only, return counts (no DB writes)
+            if is_preview:
+                preview_rows = []
+                students_new = 0
+                students_existing = 0
+                parent_usernames_seen = set()
+                parents_new_count = 0
+                parents_existing_count = 0
+                preview_errors = []
+                for row_idx, row in enumerate(worksheet.iter_rows(min_row=header_row + 1, values_only=True), start=header_row + 1):
+                    if not any(cell for cell in row):
+                        continue
+                    class_name = str(row[headers['class_name'] - 1]).strip() if headers['class_name'] <= len(row) and row[headers['class_name'] - 1] else None
+                    first_name = str(row[headers['first_name'] - 1]).strip() if headers['first_name'] <= len(row) and row[headers['first_name'] - 1] else None
+                    last_name = str(row[headers['last_name'] - 1]).strip() if headers['last_name'] <= len(row) and row[headers['last_name'] - 1] else None
+                    if not class_name or not first_name or not last_name:
+                        preview_errors.append({'row': row_idx, 'error': 'Missing class_name, first_name or last_name'})
+                        continue
+                    grade, letter = self._parse_class_name(class_name)
+                    if not grade or not letter:
+                        preview_errors.append({'row': row_idx, 'error': f'Invalid class_name: {class_name}'})
+                        continue
+                    username = self._generate_username(first_name, last_name, school)
+                    student_exists = User.objects.filter(username=username).first() is not None
+                    if student_exists:
+                        students_existing += 1
+                    else:
+                        students_new += 1
+                    p_username = row_parent_username(row, len(row))
+                    parent_status = None
+                    if p_username:
+                        if p_username not in parent_usernames_seen:
+                            parent_usernames_seen.add(p_username)
+                            par = User.objects.filter(username=p_username, role=UserRole.PARENT).first()
+                            if par:
+                                parents_existing_count += 1
+                                parent_status = 'existing'
+                            elif User.objects.filter(username=p_username).exists():
+                                parent_status = 'exists_not_parent'
+                            else:
+                                parents_new_count += 1
+                                parent_status = 'new'
+                        else:
+                            par = User.objects.filter(username=p_username, role=UserRole.PARENT).first()
+                            parent_status = 'existing' if par else 'new'
+                    preview_rows.append({
+                        'row': row_idx,
+                        'class_name': class_name,
+                        'first_name': first_name,
+                        'last_name': last_name,
+                        'student_status': 'existing' if student_exists else 'new',
+                        'parent_username': p_username or None,
+                        'parent_status': parent_status,
+                    })
+                return Response({
+                    'preview': True,
+                    'summary': {
+                        'students_new': students_new,
+                        'students_existing': students_existing,
+                        'parents_new': parents_new_count,
+                        'parents_existing': parents_existing_count,
+                        'rows_count': len(preview_rows),
+                        'errors_count': len(preview_errors),
+                    },
+                    'rows': preview_rows[:100],
+                    'errors': preview_errors[:50],
+                }, status=status.HTTP_200_OK)
+
+            # Default password for all created students and new parents
+            if not (default_password and str(default_password).strip()):
+                default_password = 'qwerty123'
+
+            # Cache: username -> parent User (for per-row parent_username)
+            parent_cache = {}
+            created_parent_passwords = {}
+
+            def get_or_create_parent(p_username):
+                if not p_username:
+                    return None, None
+                if p_username in parent_cache:
+                    return parent_cache[p_username], created_parent_passwords.get(p_username)
+                par = User.objects.filter(username=p_username, role=UserRole.PARENT).first()
+                if par:
+                    parent_cache[p_username] = par
+                    return par, None
+                existing = User.objects.filter(username=p_username).first()
+                if existing:
+                    return None, 'not_parent'  # signal error
+                pwd = default_password
+                parent_email = f'{p_username}@parent.local'
+                n = 1
+                while User.objects.filter(email=parent_email).exists():
+                    parent_email = f'{p_username}{n}@parent.local'
+                    n += 1
+                par = User.objects.create_user(
+                    username=p_username, email=parent_email, password=pwd,
+                    role=UserRole.PARENT, first_name='', last_name='', is_active=True
+                )
+                parent_cache[p_username] = par
+                created_parent_passwords[p_username] = pwd
+                return par, pwd
 
             # Process rows
             results = {
@@ -308,6 +411,7 @@ class SchoolViewSet(viewsets.ModelViewSet):
                         row) and row[headers['email'] - 1] else None
                     phone_number = str(row[headers['phone_number'] - 1]).strip(
                     ) if 'phone_number' in headers and headers['phone_number'] <= len(row) and row[headers['phone_number'] - 1] else None
+                    row_parent = row_parent_username(row, len(row))
 
                     # Validate required fields
                     if not class_name or not first_name or not last_name:
@@ -374,6 +478,15 @@ class SchoolViewSet(viewsets.ModelViewSet):
                             # Add existing user to classroom
                             ClassroomUser.objects.create(
                                 classroom=classroom, user=existing_user)
+                            if row_parent:
+                                par_user, _ = get_or_create_parent(row_parent)
+                                if par_user == None and _ == 'not_parent':
+                                    results['errors'].append({
+                                        'row': row_idx,
+                                        'error': f'User "{row_parent}" exists but is not a parent'
+                                    })
+                                elif par_user and existing_user not in par_user.children.all():
+                                    par_user.children.add(existing_user)
                             results['created_students'][class_name] = results['created_students'].get(
                                 class_name, 0) + 1
                             continue
@@ -404,6 +517,15 @@ class SchoolViewSet(viewsets.ModelViewSet):
                         # Create classroom user relationship
                         ClassroomUser.objects.create(
                             classroom=classroom, user=user)
+                        if row_parent:
+                            par_user, _ = get_or_create_parent(row_parent)
+                            if par_user is None and _ == 'not_parent':
+                                results['errors'].append({
+                                    'row': row_idx,
+                                    'error': f'User "{row_parent}" exists but is not a parent'
+                                })
+                            elif par_user:
+                                par_user.children.add(user)
 
                         results['created_students'][class_name] = results['created_students'].get(
                             class_name, 0) + 1
@@ -433,6 +555,11 @@ class SchoolViewSet(viewsets.ModelViewSet):
                 'default_password': results['default_password'],
                 'errors': results['errors'][:50]  # Limit to first 50 errors
             }
+            if created_parent_passwords:
+                response_data['created_parents'] = [
+                    {'username': uname, 'password': pwd}
+                    for uname, pwd in created_parent_passwords.items()
+                ]
 
             return Response(response_data, status=status.HTTP_200_OK)
 
@@ -581,7 +708,9 @@ class ClassroomViewSet(viewsets.ModelViewSet):
     queryset = Classroom.objects.select_related(
         'school').prefetch_related('classroom_users__user').all()
     serializer_class = ClassroomSerializer
-    permission_classes = [IsSuperAdmin]
+    # Superadmins see и управляют всеми классами,
+    # schooladmin — только классами своей школы
+    permission_classes = [IsSchoolAdminOrSuperAdmin]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['school', 'grade', 'language']
     search_fields = ['letter', 'school__name']
@@ -593,6 +722,14 @@ class ClassroomViewSet(viewsets.ModelViewSet):
         if self.action == 'retrieve':
             return ClassroomDetailSerializer
         return ClassroomSerializer
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        user = self.request.user
+        # Ограничиваем schooladmin только своей школой
+        if getattr(user, "role", None) == UserRole.SCHOOLADMIN and user.school_id:
+            queryset = queryset.filter(school_id=user.school_id)
+        return queryset
 
     @action(detail=True, methods=['post'], url_path='add-student')
     def add_student(self, request, pk=None):
@@ -670,7 +807,8 @@ class ClassroomViewSet(viewsets.ModelViewSet):
 class ClassroomUserViewSet(viewsets.ModelViewSet):
     queryset = ClassroomUser.objects.select_related('classroom', 'user').all()
     serializer_class = ClassroomUserSerializer
-    permission_classes = [IsSuperAdmin]
+    # Управление составом классов: супер‑ и школьные админы
+    permission_classes = [IsSchoolAdminOrSuperAdmin]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['classroom', 'user']
     search_fields = ['user__username', 'user__email', 'classroom__letter']
@@ -678,6 +816,13 @@ class ClassroomUserViewSet(viewsets.ModelViewSet):
                        'classroom__grade', 'classroom__letter']
     ordering = ['classroom__school__name', 'classroom__grade',
                 'classroom__letter', 'user__username']
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        user = self.request.user
+        if getattr(user, "role", None) == UserRole.SCHOOLADMIN and user.school_id:
+            queryset = queryset.filter(classroom__school_id=user.school_id)
+        return queryset
 
     @action(detail=False, methods=['post'], url_path='bulk-add')
     def bulk_add(self, request):

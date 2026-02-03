@@ -513,7 +513,6 @@ class CreateTestSerializer(serializers.ModelSerializer):
 
         if not course_section and start_date and subject_group:
             # Only auto-assign for regular tests (with subject_group), not for template tests
-            from django.utils import timezone
 
             # Convert start_date to date for comparison
             test_date = start_date.date() if hasattr(start_date, 'date') else start_date
@@ -532,10 +531,21 @@ class CreateTestSerializer(serializers.ModelSerializer):
             if auto_assigned_section:
                 data['course_section'] = auto_assigned_section
             else:
-                error_msg = f"No course section found for the start date {test_date}"
-                error_msg += f" in subject group {subject_group.id}"
-                error_msg += ". Please provide a course_section or ensure there's a section with start_date <= {test_date} <= end_date."
-                raise serializers.ValidationError(error_msg)
+                # Если подходящей секции нет, создаём простую секцию под эту дату,
+                # чтобы тест можно было сохранить и привязать к группе.
+                from courses.models import CourseSection as CS  # avoid shadowing
+                auto_assigned_section = CS.objects.create(
+                    subject_group=subject_group,
+                    title=f"Auto section for {test_date}",
+                    is_general=False,
+                    start_date=test_date,
+                    end_date=test_date,
+                )
+                logger.info(
+                    f"CreateTestSerializer.validate: auto-created course_section={auto_assigned_section} "
+                    f"for subject_group={subject_group.id} and date={test_date}"
+                )
+                data['course_section'] = auto_assigned_section
 
         # CRITICAL: Always preserve explicitly provided course_section (for template tests)
         # This ensures user's selection is never overwritten by auto-assignment
@@ -547,14 +557,9 @@ class CreateTestSerializer(serializers.ModelSerializer):
         # Use original_course_section for final check (preserves user's choice)
         final_course_section = original_course_section if original_course_section else course_section
 
-        # Allow null course_section for template tests (when creating template tests without section)
-        # Only require course_section for regular tests (with subject_group)
-        if not final_course_section and subject_group:
-            raise serializers.ValidationError(
-                "Either course_section must be provided or start_date must be provided "
-                "to auto-assign a course section."
-            )
-        # For template tests (no subject_group), course_section can be null
+        # Allow null course_section for template tests (when creating template tests without section).
+        # Для обычных тестов мы выше гарантированно создаём/подбираем секцию,
+        # поэтому здесь дополнительная валидация не требуется.
 
         # Remove subject_group from data since it's not a field on Test model
         if 'subject_group' in data:

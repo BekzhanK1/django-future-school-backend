@@ -114,7 +114,11 @@ def notify_test_available(test, students: List[User], teacher: User):
 def notify_test_graded(attempt, student: User, teacher: User):
     """Notify student that their test was graded"""
     score = attempt.score
-    max_score = attempt.test.max_score
+    # Use attempt.max_score if stored; otherwise fall back to total_points over questions
+    max_score = getattr(attempt, "max_score", None)
+    if max_score is None:
+        # total_points is a @property on Test summing question.points
+        max_score = getattr(attempt.test, "total_points", None)
     return create_notification(
         user=student,
         notification_type=NotificationType.TEST_GRADED,

@@ -1096,6 +1096,107 @@ class ManualGradeViewSet(viewsets.ModelViewSet):
         results.sort(key=lambda x: x['graded_at'] or timezone.now(), reverse=True)
         return Response({'results': results})
 
+    @action(detail=False, methods=['get'], url_path='student-summary')
+    def student_summary(self, request):
+        """
+        Сводка оценок ученика по всем его предметам.
+
+        Параметры:
+        - student_id (обязателен для родителя/учителя/админа, для ученика можно не передавать)
+        """
+        from courses.models import SubjectGroup
+        from assessments.models import Attempt
+
+        user = request.user
+        student_id = request.query_params.get('student_id')
+
+        # Определяем целевого ученика
+        if user.role == UserRole.STUDENT:
+            target_student_id = user.id if not student_id else int(student_id)
+            if target_student_id != user.id:
+                return Response(
+                    {'error': 'Students can only view their own summary'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        elif user.role == UserRole.PARENT:
+            if not student_id:
+                return Response(
+                    {'error': 'student_id is required for parent'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            target_student_id = int(student_id)
+            if not user.children.filter(id=target_student_id, role=UserRole.STUDENT).exists():
+                return Response(
+                    {'error': 'You can only view summary for your own children'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        else:
+            if not student_id:
+                return Response(
+                    {'error': 'student_id is required'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            target_student_id = int(student_id)
+
+        # Находим все subject_group, где учится ученик
+        subject_groups = SubjectGroup.objects.filter(
+            classroom__classroom_users__user_id=target_student_id
+        ).select_related('course', 'classroom').distinct()
+
+        summary = []
+
+        for sg in subject_groups:
+            # Ручные оценки -> приводим к процентам
+            manual_qs = ManualGrade.objects.filter(
+                student_id=target_student_id,
+                subject_group=sg,
+            )
+            manual_values = []
+            for mg in manual_qs:
+                if mg.value is not None and mg.max_value:
+                    manual_values.append((mg.value / mg.max_value) * 100.0)
+
+            # Оценки за задания -> тоже в процентах относительно max_grade
+            # Фильтруем по course_section__subject_group, так как у Assignment нет прямого FK на SubjectGroup
+            grades_qs = Grade.objects.filter(
+                submission__student_id=target_student_id,
+                submission__assignment__course_section__subject_group_id=sg.id,
+            ).select_related('submission__assignment')
+
+            assignment_values = []
+            for g in grades_qs:
+                if g.grade_value is not None:
+                    assignment = getattr(g.submission, "assignment", None)
+                    max_grade = getattr(assignment, "max_grade", None) if assignment else None
+                    if max_grade:
+                        assignment_values.append((g.grade_value / max_grade) * 100.0)
+
+            # Оценки за тесты (берём процент как есть)
+            attempts = Attempt.objects.filter(
+                student_id=target_student_id,
+                test__course_section__subject_group=sg,
+                is_completed=True,
+            )
+            attempt_values = [a.percentage for a in attempts if a.percentage is not None]
+
+            # Все значения теперь в процентах (0–100)
+            all_values = manual_values + assignment_values + attempt_values
+            avg = sum(all_values) / len(all_values) if all_values else None
+
+            summary.append(
+                {
+                    'subject_group_id': sg.id,
+                    'course_name': sg.course.name,
+                    'classroom_name': str(sg.classroom),
+                    'average': avg,
+                    'manual_count': len(manual_values),
+                    'assignment_grades_count': len(assignment_values),
+                    'test_attempts_count': len(attempt_values),
+                }
+            )
+
+        return Response({'results': summary})
+
 
 class GradeWeightViewSet(viewsets.ModelViewSet):
     queryset = GradeWeight.objects.select_related('subject_group').all()
@@ -1181,6 +1282,15 @@ class AttendanceViewSet(viewsets.ModelViewSet):
         # School admins can see attendance from their school
         elif user.role == UserRole.SCHOOLADMIN:
             queryset = queryset.filter(subject_group__classroom__school=user.school)
+        # Parents can see attendance only for their children
+        elif user.role == UserRole.PARENT:
+            # Get all classrooms where the user's children study
+            children = user.children.filter(role=UserRole.STUDENT)
+            from schools.models import Classroom
+            child_classrooms = Classroom.objects.filter(
+                classroom_users__user__in=children
+            ).distinct()
+            queryset = queryset.filter(subject_group__classroom__in=child_classrooms)
         # Superadmins can see all attendance (default queryset)
         
         return queryset
@@ -1197,28 +1307,64 @@ class AttendanceViewSet(viewsets.ModelViewSet):
         
         user = request.user
         
-        # Check permissions
-        if user.role == UserRole.STUDENT and str(user.id) != str(student_id):
-            return Response({'error': 'You can only view your own attendance history'}, 
-                          status=status.HTTP_403_FORBIDDEN)
+        # Check permissions and build queryset depending on role
+        if user.role == UserRole.STUDENT:
+            if str(user.id) != str(student_id):
+                return Response(
+                    {'error': 'You can only view your own attendance history'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            records = AttendanceRecord.objects.filter(
+                student_id=student_id
+            ).select_related(
+                'attendance__subject_group__course',
+                'attendance__subject_group__classroom',
+                'attendance__taken_by'
+            )
+        elif user.role == UserRole.PARENT:
+            # Parents can only see attendance for their own children
+            if not user.children.filter(id=student_id, role=UserRole.STUDENT).exists():
+                return Response(
+                    {'error': 'You can only view attendance for your own children'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            records = AttendanceRecord.objects.filter(
+                student_id=student_id
+            ).select_related(
+                'attendance__subject_group__course',
+                'attendance__subject_group__classroom',
+                'attendance__taken_by'
+            )
         elif user.role == UserRole.TEACHER:
             # Teachers can only see students from their subject groups
             teacher_subject_groups = user.subject_groups.values_list('id', flat=True)
             records = AttendanceRecord.objects.filter(
                 student_id=student_id,
                 attendance__subject_group__in=teacher_subject_groups
-            ).select_related('attendance__subject_group__course', 'attendance__subject_group__classroom', 'attendance__taken_by')
+            ).select_related(
+                'attendance__subject_group__course',
+                'attendance__subject_group__classroom',
+                'attendance__taken_by'
+            )
         elif user.role == UserRole.SCHOOLADMIN:
             # School admins can see students from their school
             records = AttendanceRecord.objects.filter(
                 student_id=student_id,
                 attendance__subject_group__classroom__school=user.school
-            ).select_related('attendance__subject_group__course', 'attendance__subject_group__classroom', 'attendance__taken_by')
+            ).select_related(
+                'attendance__subject_group__course',
+                'attendance__subject_group__classroom',
+                'attendance__taken_by'
+            )
         else:
             # Superadmin can see all
             records = AttendanceRecord.objects.filter(
                 student_id=student_id
-            ).select_related('attendance__subject_group__course', 'attendance__subject_group__classroom', 'attendance__taken_by')
+            ).select_related(
+                'attendance__subject_group__course',
+                'attendance__subject_group__classroom',
+                'attendance__taken_by'
+            )
         
         serializer = StudentAttendanceHistorySerializer(records, many=True)
         return Response(serializer.data)

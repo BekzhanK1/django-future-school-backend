@@ -104,20 +104,39 @@ class TestViewSet(viewsets.ModelViewSet):
             if is_template_filter:
                 queryset = queryset.none()
             else:
-                children_ids = user.children.filter(role=UserRole.STUDENT).values_list('id', flat=True)
-                children_course_sections = Q()
-                for child_id in children_ids:
-                    child = User.objects.get(id=child_id)
-                    child_sections = child.classroom_users.values_list(
-                        'classroom__subject_groups__sections', flat=True
+                student_id = self.request.query_params.get('student') or self.request.query_params.get('student_id')
+                if student_id:
+                    try:
+                        student_id = int(student_id)
+                        if user.children.filter(id=student_id, role=UserRole.STUDENT).exists():
+                            child_sections = User.objects.filter(id=student_id).values_list(
+                                'classroom_users__classroom__subject_groups__sections', flat=True
+                            ).distinct()
+                            queryset = queryset.filter(
+                                course_section__in=child_sections,
+                                course_section__isnull=False,
+                                course_section__subject_group__isnull=False,
+                                course_section__course__isnull=True
+                            )
+                        else:
+                            queryset = queryset.none()
+                    except (TypeError, ValueError):
+                        queryset = queryset.none()
+                else:
+                    children_ids = user.children.filter(role=UserRole.STUDENT).values_list('id', flat=True)
+                    children_course_sections = Q()
+                    for child_id in children_ids:
+                        child = User.objects.get(id=child_id)
+                        child_sections = child.classroom_users.values_list(
+                            'classroom__subject_groups__sections', flat=True
+                        )
+                        children_course_sections |= Q(course_section__in=child_sections)
+                    queryset = queryset.filter(
+                        children_course_sections,
+                        course_section__isnull=False,
+                        course_section__subject_group__isnull=False,
+                        course_section__course__isnull=True
                     )
-                    children_course_sections |= Q(course_section__in=child_sections)
-                queryset = queryset.filter(
-                    children_course_sections,
-                    course_section__isnull=False,
-                    course_section__subject_group__isnull=False,
-                    course_section__course__isnull=True
-                )
         # Teachers can see tests they created, and template tests for courses they teach
         elif user.role == UserRole.TEACHER:
             if is_template_filter:
