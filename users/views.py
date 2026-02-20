@@ -325,6 +325,42 @@ def confirm_password_reset(request):
 
 
 class UserViewSet(ModelViewSet):
+    @extend_schema(
+        operation_id='get_user_contacts',
+        summary='Get user contacts for messaging',
+        responses={200: UserSerializer(many=True)},
+        tags=['users']
+    )
+    @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    def contacts(self, request):
+        user = request.user
+        from courses.models import SubjectGroup
+        from schools.models import ClassroomUser
+        
+        if user.role == UserRole.TEACHER:
+            # Parents of students in their classes
+            subject_groups = SubjectGroup.objects.filter(teacher=user)
+            student_ids = ClassroomUser.objects.filter(
+                classroom__subject_groups__in=subject_groups
+            ).values_list('user_id', flat=True)
+            contacts = User.objects.filter(children__in=student_ids).distinct()
+            
+        elif user.role == UserRole.PARENT:
+            # Teachers of their children
+            child_ids = user.children.values_list('id', flat=True)
+            subject_groups = SubjectGroup.objects.filter(
+                classroom__classroom_users__user_id__in=child_ids
+            )
+            contacts = User.objects.filter(
+                id__in=subject_groups.values_list('teacher_id', flat=True)
+            ).distinct()
+            
+        else:
+            contacts = User.objects.none()
+            
+        serializer = UserSerializer(contacts, many=True)
+        return Response(serializer.data)
+
     queryset = User.objects.select_related('school').prefetch_related('children', 'parents').all()
     serializer_class = UserSerializer
     permission_classes = [IsSuperAdmin]
@@ -340,7 +376,10 @@ class UserViewSet(ModelViewSet):
         - Superadmins: full access
         - Schooladmins: can list users (for event creation search), filtered by school
         - Authenticated users: can retrieve and partial_update their own user (profile)
+        - Teacher/Parent: can get contacts for messaging
         """
+        if self.action == 'contacts' and self.request.user.is_authenticated:
+            return [permissions.IsAuthenticated()]
         if self.action in ['retrieve'] and self.request.user.is_authenticated:
             return [permissions.IsAuthenticated()]
         if self.action in ['partial_update', 'update'] and self.request.user.is_authenticated:

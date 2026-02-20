@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import ForumThread, ForumPost, PostReaction
+from .models import ForumThread, ForumPost, PostReaction, ForumPostAttachment
 
 
 @admin.register(ForumThread)
@@ -13,6 +13,11 @@ class ForumThreadAdmin(admin.ModelAdmin):
     readonly_fields = ('created_at', 'updated_at')
 
 
+class ForumPostAttachmentInline(admin.TabularInline):
+    model = ForumPostAttachment
+    extra = 0
+
+
 @admin.register(ForumPost)
 class ForumPostAdmin(admin.ModelAdmin):
     list_display = ('id', 'thread', 'author', 'content',
@@ -22,6 +27,7 @@ class ForumPostAdmin(admin.ModelAdmin):
     autocomplete_fields = ('thread', 'author')
     date_hierarchy = 'created_at'
     readonly_fields = ('created_at', 'updated_at')
+    inlines = (ForumPostAttachmentInline,)
 
 
 @admin.register(PostReaction)

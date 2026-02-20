@@ -181,6 +181,9 @@ class CourseSectionSerializer(serializers.ModelSerializer):
         # Get root resources (no parent) for this section
         root_resources = obj.resources.filter(
             parent_resource__isnull=True).order_by('position', 'id')
+        # Students and parents must not see resources hidden from students (backend enforcement)
+        if request and request.user.is_authenticated and request.user.role in (UserRole.STUDENT, UserRole.PARENT):
+            root_resources = root_resources.filter(is_visible_to_students=True)
 
         return ResourceTreeSerializer(root_resources, many=True, context=self.context).data
 

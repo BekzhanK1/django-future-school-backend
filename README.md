@@ -1211,12 +1211,26 @@ If you need help with the API, check the Swagger documentation or contact the ba
 **Happy coding! 🚀**
 ## ⚙️ Environment (Email & Celery)
 
-Add these to your `.env`:
+Add these to your `.env` (copy from `.env.example`):
 
 ```env
+# PostgreSQL (optional; if unset, SQLite is used)
+DB_NAME=your_database_name
+DB_USER=your_username
+DB_PASSWORD=your_password
+DB_HOST=localhost
+DB_PORT=5432
+
+# Django
+DJANGO_SECRET_KEY=your-secret-key
+FRONTEND_URL=http://localhost:3000
+
+# Email
 GMAIL_EMAIL=your_gmail_address@gmail.com
 GMAIL_PASSWORD=your_gmail_app_password
 DEFAULT_FROM_EMAIL=Future School <your_gmail_address@gmail.com>
+
+# Celery
 CELERY_BROKER_URL=redis://localhost:6379/0
 CELERY_RESULT_BACKEND=redis://localhost:6379/0
 CELERY_TASK_ALWAYS_EAGER=false

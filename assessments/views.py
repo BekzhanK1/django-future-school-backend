@@ -78,6 +78,10 @@ class TestViewSet(viewsets.ModelViewSet):
             return CreateTestSerializer
         return TestSerializer
 
+    def perform_create(self, serializer):
+        serializer.save(teacher=self.request.user)
+        # Notifications for new/published test are sent via users.signals_notifications.test_created_or_published
+
     def get_queryset(self):
         queryset = super().get_queryset()
         user = self.request.user
@@ -224,6 +228,7 @@ class TestViewSet(viewsets.ModelViewSet):
         test = self.get_object()
         test.is_published = True
         test.save()
+        # Notifications sent via users.signals_notifications.test_created_or_published (elif branch)
         serializer = self.get_serializer(test)
         return Response(serializer.data)
 
@@ -1146,6 +1151,9 @@ class TestViewSet(viewsets.ModelViewSet):
         attempt.is_graded = True
         attempt.graded_at = timezone.now()
         attempt.save()
+
+        from users.notifications_helper import notify_test_graded
+        notify_test_graded(attempt, attempt.student, test.teacher)
 
     def _build_score_update_response(self, answer):
         """Build response data for score update."""

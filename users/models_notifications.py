@@ -17,8 +17,14 @@ class NotificationType(models.TextChoices):
     # Forum
     FORUM_QUESTION = "forum_question", "Forum Question"
     FORUM_REPLY = "forum_reply", "Forum Reply"
+    FORUM_ANNOUNCEMENT = "forum_announcement", "Forum Announcement"
+    FORUM_DIRECT_MESSAGE = "forum_direct_message", "Direct Message"
     FORUM_MENTION = "forum_mention", "Forum Mention"
     FORUM_RESOLVED = "forum_resolved", "Forum Resolved"
+
+    # Grades & events
+    MANUAL_GRADE = "manual_grade", "Manual Grade"
+    NEW_EVENT = "new_event", "New Event"
 
     # Other
     OTHER = "other", "Other"

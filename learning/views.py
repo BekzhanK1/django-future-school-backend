@@ -79,7 +79,8 @@ class ResourceViewSet(viewsets.ModelViewSet):
             # IMPORTANT: Students should NOT see template sections (where subject_group is null)
             queryset = queryset.filter(
                 course_section__subject_group__classroom__in=student_classrooms,
-                course_section__subject_group__isnull=False  # Exclude template sections
+                course_section__subject_group__isnull=False,  # Exclude template sections
+                is_visible_to_students=True
             )
         # Parents can see resources for their children's courses
         elif user.role == UserRole.PARENT:
@@ -91,7 +92,8 @@ class ResourceViewSet(viewsets.ModelViewSet):
                 children_classrooms |= Q(course_section__subject_group__classroom__in=child_classrooms)
             queryset = queryset.filter(
                 children_classrooms,
-                course_section__subject_group__isnull=False
+                course_section__subject_group__isnull=False,
+                is_visible_to_students=True
             )
         # Teachers can see resources for their subject groups
         elif user.role == UserRole.TEACHER:
@@ -106,6 +108,29 @@ class ResourceViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(parent_resource__isnull=True)
         
         return queryset
+
+    def perform_create(self, serializer):
+        resource = serializer.save()
+        if resource.is_visible_to_students and resource.type != 'directory':
+            course_section = resource.course_section
+            if course_section and course_section.subject_group:
+                from django.contrib.auth import get_user_model
+                from users.models import UserRole
+                from users.notifications_helper import create_notification
+                from users.models_notifications import NotificationType
+                User = get_user_model()
+                students = User.objects.filter(
+                    classroom_users__classroom=course_section.subject_group.classroom,
+                    role=UserRole.STUDENT
+                )
+                for student in students:
+                    create_notification(
+                        user=student,
+                        notification_type=NotificationType.OTHER,
+                        title=f"Новый материал: {resource.title}",
+                        message=f"Добавлен новый учебный материал.",
+                        triggered_by=self.request.user
+                    )
 
     @action(detail=False, methods=['patch'], url_path='change-items-order')
     def change_items_order(self, request):
@@ -124,31 +149,26 @@ class ResourceViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['get'], url_path='all')
     def all_resources(self, request):
-        """Get all resources for a course section (including children)"""
+        """Get all resources for a course section (including children). Students only see is_visible_to_students=True."""
         course_section_id = request.query_params.get('course_section_id')
         if not course_section_id:
             return Response({'error': 'course_section_id is required'}, status=status.HTTP_400_BAD_REQUEST)
-        
-        resources = Resource.objects.filter(
+        resources = self.get_queryset().filter(
             course_section_id=course_section_id
         ).order_by('position', 'id')
-        
         serializer = ResourceSerializer(resources, many=True, context={'request': request})
         return Response(serializer.data)
-    
+
     @action(detail=False, methods=['get'], url_path='tree')
     def tree(self, request):
-        """Get resource tree for a course section (root resources with nested children)"""
+        """Get resource tree for a course section (root resources with nested children). Students only see is_visible_to_students=True."""
         course_section_id = request.query_params.get('course_section_id')
         if not course_section_id:
             return Response({'error': 'course_section_id is required'}, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Get root resources (no parent)
-        root_resources = Resource.objects.filter(
+        root_resources = self.get_queryset().filter(
             course_section_id=course_section_id,
             parent_resource__isnull=True
         ).order_by('position', 'id')
-        
         serializer = ResourceTreeSerializer(root_resources, many=True, context={'request': request})
         return Response(serializer.data)
     
@@ -537,6 +557,20 @@ class AssignmentViewSet(viewsets.ModelViewSet):
         
         return [permission() for permission in permission_classes]
 
+    def perform_create(self, serializer):
+        assignment = serializer.save(teacher=self.request.user)
+        course_section = assignment.course_section
+        if course_section and course_section.subject_group:
+            from django.contrib.auth import get_user_model
+            from users.models import UserRole
+            from users.notifications_helper import notify_new_assignment
+            User = get_user_model()
+            students = User.objects.filter(
+                classroom_users__classroom=course_section.subject_group.classroom,
+                role=UserRole.STUDENT
+            )
+            notify_new_assignment(assignment, list(students), self.request.user)
+
     @action(detail=True, methods=['post'], url_path='unlink-from-template')
     def unlink_from_template(self, request, pk=None):
         """
@@ -919,6 +953,10 @@ class GradeViewSet(viewsets.ModelViewSet):
         
         return queryset
     
+    def perform_create(self, serializer):
+        serializer.save(graded_by=self.request.user)
+        # Notifications sent via users.signals_notifications.grade_created_or_updated
+
     @action(detail=False, methods=['post'], url_path='bulk-grade')
     def bulk_grade(self, request):
         """Bulk grade multiple submissions"""
@@ -941,6 +979,7 @@ class GradeViewSet(viewsets.ModelViewSet):
                     grade.graded_by = request.user
                     grade.save()
                 grades.append(grade)
+            # Notifications sent via users.signals_notifications.grade_created_or_updated
             
             response_serializer = GradeSerializer(grades, many=True)
             return Response(response_serializer.data, status=status.HTTP_201_CREATED)
@@ -973,7 +1012,13 @@ class ManualGradeViewSet(viewsets.ModelViewSet):
         return queryset
 
     def perform_create(self, serializer):
-        serializer.save(graded_by=self.request.user)
+        manual_grade = serializer.save(graded_by=self.request.user)
+        from users.notifications_helper import notify_manual_grade
+        notify_manual_grade(
+            manual_grade,
+            manual_grade.student,
+            self.request.user,
+        )
 
     @action(detail=False, methods=['get'], url_path='grade-book')
     def grade_book(self, request):
@@ -1556,7 +1601,24 @@ class EventViewSet(viewsets.ModelViewSet):
 		return [RoleBasedPermission()]
 
 	def perform_create(self, serializer):
-		serializer.save(created_by=self.request.user)
+		event = serializer.save(created_by=self.request.user)
+		# Notify target users about the new event
+		from django.contrib.auth import get_user_model
+		from users.models import UserRole
+		from users.notifications_helper import notify_new_event
+		User = get_user_model()
+		users_to_notify = []
+		if event.target_users.exists():
+			users_to_notify = list(event.target_users.all())
+		elif event.subject_group_id:
+			users_to_notify = list(
+				User.objects.filter(
+					classroom_users__classroom=event.subject_group.classroom,
+					role=UserRole.STUDENT,
+				).distinct()
+			)
+		if users_to_notify:
+			notify_new_event(event, users_to_notify, self.request.user)
 
 	@action(detail=False, methods=['post'], url_path='create-recurring')
 	def create_recurring(self, request):

@@ -164,3 +164,97 @@ def notify_forum_resolved(thread, resolved_by: User):
         triggered_by=resolved_by,
         related_forum_thread=thread,
     )
+
+
+def notify_manual_grade(manual_grade, student: User, teacher: User):
+    """Notify student about a new manual grade from teacher"""
+    msg = f"Вы получили оценку {manual_grade.value}"
+    if manual_grade.feedback:
+        msg += f". {manual_grade.feedback}"
+    return create_notification(
+        user=student,
+        notification_type=NotificationType.MANUAL_GRADE,
+        title=f"Новая оценка: {manual_grade.title or 'Оценка'}",
+        message=msg,
+        triggered_by=teacher,
+    )
+
+
+def notify_new_event(event, users: List[User], created_by: User):
+    """Notify users about a new calendar event"""
+    notifications = []
+    msg = "Добавлено в календарь."
+    if event.description:
+        msg = event.description[:200] + "..." if len(event.description) > 200 else event.description
+    for u in users:
+        if u.id == created_by.id:
+            continue
+        notifications.append(
+            create_notification(
+                user=u,
+                notification_type=NotificationType.NEW_EVENT,
+                title=f"Новое событие: {event.title}",
+                message=msg,
+                triggered_by=created_by,
+            )
+        )
+    return notifications
+
+
+def notify_forum_announcement(thread, students: List[User], teacher: User):
+    """Notify students when teacher publishes an announcement"""
+    notifications = []
+    for student in students:
+        notifications.append(
+            create_notification(
+                user=student,
+                notification_type=NotificationType.FORUM_ANNOUNCEMENT,
+                title=f"Объявление: {thread.title}",
+                message=f"Преподаватель {teacher.get_full_name() or teacher.username} опубликовал объявление.",
+                triggered_by=teacher,
+                related_forum_thread=thread,
+            )
+        )
+    return notifications
+
+
+def notify_direct_message_new_thread(thread, recipients: List[User], sender: User):
+    """Notify participants when someone starts a new direct message thread"""
+    notifications = []
+    sender_name = sender.get_full_name() or sender.username
+    for user in recipients:
+        if user.id == sender.id:
+            continue
+        notifications.append(
+            create_notification(
+                user=user,
+                notification_type=NotificationType.FORUM_DIRECT_MESSAGE,
+                title=f"Новое сообщение: {thread.title}",
+                message=f"{sender_name} начал(а) переписку с вами.",
+                triggered_by=sender,
+                related_forum_thread=thread,
+            )
+        )
+    return notifications
+
+
+def notify_direct_message_reply(post, recipients: List[User], reply_author: User):
+    """Notify other participants when someone replies in a direct message thread"""
+    notifications = []
+    author_name = reply_author.get_full_name() or reply_author.username
+    preview = (post.content[:100] + "…") if len(post.content) > 100 else post.content
+    for user in recipients:
+        if user.id == reply_author.id:
+            continue
+        notifications.append(
+            create_notification(
+                user=user,
+                notification_type=NotificationType.FORUM_DIRECT_MESSAGE,
+                title=f"Новое сообщение: {post.thread.title}",
+                message=f"{author_name}: {preview}",
+                triggered_by=reply_author,
+                related_forum_thread=post.thread,
+                related_forum_post=post,
+            )
+        )
+    return notifications

@@ -9,7 +9,7 @@ class UserSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'phone_number', 'role', 'is_active', 'kundelik_id', 'school', 'school_name', 'children', 'parents', 'avatar']
+        fields = ['id', 'username', 'email', 'iin', 'first_name', 'last_name', 'phone_number', 'role', 'is_active', 'kundelik_id', 'school', 'school_name', 'children', 'parents', 'avatar']
         read_only_fields = ['id', 'username']
 
     def get_children(self, obj):
@@ -40,14 +40,21 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class ProfileUpdateSerializer(serializers.ModelSerializer):
-    """For authenticated user updating own profile: phone_number and avatar only."""
+    """For authenticated user updating own profile: phone_number, iin, and avatar only."""
     class Meta:
         model = User
-        fields = ['phone_number', 'avatar']
+        fields = ['phone_number', 'iin', 'avatar']
         extra_kwargs = {
             'phone_number': {'required': False, 'allow_blank': True},
+            'iin': {'required': False, 'allow_blank': True},
             'avatar': {'required': False, 'allow_blank': True},
         }
+        
+    def validate_iin(self, value):
+        if value:
+            if not value.isdigit() or len(value) != 12:
+                raise serializers.ValidationError("IIN must be exactly 12 digits.")
+        return value
 
 
 class UserCreateSerializer(serializers.ModelSerializer):
@@ -56,10 +63,17 @@ class UserCreateSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = User
-        fields = ['username', 'email', 'first_name', 'last_name', 'phone_number', 'password', 'password_confirm', 'role', 'school', 'kundelik_id', 'is_active']
+        fields = ['username', 'email', 'iin', 'first_name', 'last_name', 'phone_number', 'password', 'password_confirm', 'role', 'school', 'kundelik_id', 'is_active']
         extra_kwargs = {
-            'is_active': {'default': True}
+            'is_active': {'default': True},
+            'iin': {'required': False, 'allow_blank': True}
         }
+    
+    def validate_iin(self, value):
+        if value:
+            if not value.isdigit() or len(value) != 12:
+                raise serializers.ValidationError("IIN must be exactly 12 digits.")
+        return value
     
     def validate(self, attrs):
         if attrs['password'] != attrs['password_confirm']:

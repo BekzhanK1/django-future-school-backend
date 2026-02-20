@@ -33,12 +33,12 @@ class ForumThreadViewSet(viewsets.ModelViewSet):
             "subject_group__teacher",
             "created_by",
         )
-        .prefetch_related("posts__author")
+        .prefetch_related("posts__author", "posts__attachments")
         .all()
     )
     permission_classes = [RoleBasedPermission]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ["subject_group", "type", "is_public", "is_resolved"]
+    filterset_fields = ["subject_group", "type", "is_public", "is_resolved", "archived"]
     search_fields = ["title", "posts__content"]
     ordering_fields = ["created_at"]
     ordering = ["-created_at"]
@@ -56,30 +56,43 @@ class ForumThreadViewSet(viewsets.ModelViewSet):
         if user.role in [UserRole.SUPERADMIN, UserRole.SCHOOLADMIN]:
             return qs
 
-        # Teacher: threads in their subject groups
+        # Teacher: threads in their subject groups + direct messages
         if user.role == UserRole.TEACHER:
-            return qs.filter(subject_group__teacher=user)
+            return qs.filter(
+                models.Q(subject_group__teacher=user) | models.Q(participants=user)
+            ).distinct()
 
-        # Student: threads in their classrooms; private only if they created them
+        # Student: threads in their classrooms; private only if they created them + direct messages; hide archived announcements; never show "to parents"
         if user.role == UserRole.STUDENT:
             classroom_ids = ClassroomUser.objects.filter(user=user).values_list(
                 "classroom_id", flat=True
             )
             return qs.filter(
-                subject_group__classroom_id__in=classroom_ids
-            ).filter(
-                models.Q(is_public=True) | models.Q(created_by=user)
-            )
+                (models.Q(subject_group__classroom_id__in=classroom_ids) & 
+                 (models.Q(is_public=True) | models.Q(created_by=user))) |
+                models.Q(participants=user)
+            ).exclude(type="announcement", archived=True).exclude(
+                type="announcement_to_parents"
+            ).distinct()
 
-        # Parent (spectator): only public threads in subject groups where their children study
+        # Parent: public threads + own (private) threads + teacher's "to parents" announcements in child's classes + direct messages; hide student announcements
         if user.role == UserRole.PARENT:
             child_classrooms = user.children.values_list(
                 "classroom_users__classroom_id", flat=True
             )
             return qs.filter(
-                subject_group__classroom_id__in=child_classrooms,
-                is_public=True,
-            )
+                (
+                    models.Q(subject_group__classroom_id__in=child_classrooms)
+                    & (
+                        models.Q(is_public=True)
+                        | models.Q(created_by=user)
+                        | models.Q(type="announcement_to_parents")
+                    )
+                )
+                | models.Q(participants=user)
+            ).exclude(type="announcement", archived=True).exclude(
+                type="announcement_to_parents", archived=True
+            ).distinct()
 
         # Other roles: no access
         return qs.none()
@@ -112,6 +125,48 @@ class ForumThreadViewSet(viewsets.ModelViewSet):
         serializer = ForumThreadSerializer(thread, context={"request": request})
         return Response(serializer.data)
 
+    @extend_schema(
+        operation_id="forum_threads_archive",
+        summary="Archive announcement (hide from students)",
+        request=None,
+        responses={200: ForumThreadSerializer, 403: OpenApiTypes.OBJECT},
+        tags=["Forum"],
+    )
+    @action(detail=True, methods=["post"], url_path="archive")
+    def archive(self, request, pk=None):
+        """Teacher archives an announcement so students no longer see it."""
+        thread = self.get_object()
+        if not thread.subject_group or thread.subject_group.teacher_id != request.user.id:
+            return Response(
+                {"error": "Only the subject group teacher can archive this thread"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        thread.archived = True
+        thread.save(update_fields=["archived"])
+        serializer = ForumThreadSerializer(thread, context={"request": request})
+        return Response(serializer.data)
+
+    @extend_schema(
+        operation_id="forum_threads_unarchive",
+        summary="Unarchive announcement",
+        request=None,
+        responses={200: ForumThreadSerializer, 403: OpenApiTypes.OBJECT},
+        tags=["Forum"],
+    )
+    @action(detail=True, methods=["post"], url_path="unarchive")
+    def unarchive(self, request, pk=None):
+        """Teacher makes archived announcement visible to students again."""
+        thread = self.get_object()
+        if not thread.subject_group or thread.subject_group.teacher_id != request.user.id:
+            return Response(
+                {"error": "Only the subject group teacher can unarchive this thread"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        thread.archived = False
+        thread.save(update_fields=["archived"])
+        serializer = ForumThreadSerializer(thread, context={"request": request})
+        return Response(serializer.data)
+
 
 class ForumPostViewSet(viewsets.ModelViewSet):
     """
@@ -120,7 +175,7 @@ class ForumPostViewSet(viewsets.ModelViewSet):
 
     queryset = ForumPost.objects.select_related(
         "thread", "author", "thread__subject_group", "thread__subject_group__teacher", "thread__created_by"
-    ).all()
+    ).prefetch_related("attachments").all()
     serializer_class = ForumPostSerializer
     permission_classes = [RoleBasedPermission]
     filter_backends = [DjangoFilterBackend, OrderingFilter]
@@ -136,47 +191,60 @@ class ForumPostViewSet(viewsets.ModelViewSet):
         if user.role in [UserRole.SUPERADMIN, UserRole.SCHOOLADMIN]:
             return qs
 
-        # Teacher: posts in threads from their subject groups
+        # Teacher: posts in threads from their subject groups + direct messages
         if user.role == UserRole.TEACHER:
-            return qs.filter(thread__subject_group__teacher=user)
+            return qs.filter(
+                models.Q(thread__subject_group__teacher=user) | models.Q(thread__participants=user)
+            ).distinct()
 
-        # Student: posts in threads they can access (public or created by them)
+        # Student: hide archived announcements and "to parents" threads
         if user.role == UserRole.STUDENT:
             classroom_ids = ClassroomUser.objects.filter(user=user).values_list(
                 "classroom_id", flat=True
             )
             return qs.filter(
-                thread__subject_group__classroom_id__in=classroom_ids
-            ).filter(
-                models.Q(thread__is_public=True) | models.Q(thread__created_by=user)
-            )
+                (models.Q(thread__subject_group__classroom_id__in=classroom_ids) & 
+                 (models.Q(thread__is_public=True) | models.Q(thread__created_by=user))) |
+                models.Q(thread__participants=user)
+            ).exclude(thread__type="announcement", thread__archived=True).exclude(
+                thread__type="announcement_to_parents"
+            ).distinct()
 
-        # Parent: only posts in public threads from their children's classrooms
+        # Parent: include "to parents" announcements in their children's classes
         if user.role == UserRole.PARENT:
             child_classrooms = user.children.values_list(
                 "classroom_users__classroom_id", flat=True
             )
             return qs.filter(
-                thread__subject_group__classroom_id__in=child_classrooms,
-                thread__is_public=True,
-            )
+                (
+                    models.Q(thread__subject_group__classroom_id__in=child_classrooms)
+                    & (
+                        models.Q(thread__is_public=True)
+                        | models.Q(thread__created_by=user)
+                        | models.Q(thread__type="announcement_to_parents")
+                    )
+                )
+                | models.Q(thread__participants=user)
+            ).exclude(thread__type="announcement", thread__archived=True).exclude(
+                thread__type="announcement_to_parents", thread__archived=True
+            ).distinct()
 
         # Other roles: no access
         return qs.none()
 
     def perform_create(self, serializer):
-        # Check if replies are allowed in this thread
         from rest_framework import serializers as drf_serializers
+
         thread_id = self.request.data.get('thread')
         if thread_id:
             try:
-                thread = ForumThread.objects.get(id=thread_id)
-                if not thread.allow_replies:
+                thread_obj = ForumThread.objects.get(id=thread_id)
+                if not thread_obj.allow_replies:
                     raise drf_serializers.ValidationError("Replies are not allowed on this thread")
             except ForumThread.DoesNotExist:
                 pass
-        
-        serializer.save(author=self.request.user)
+        post = serializer.save(author=self.request.user)
+        # Notifications for replies are sent via users.signals_notifications.forum_post_created
 
     @extend_schema(
         operation_id="forum_posts_add_reaction",

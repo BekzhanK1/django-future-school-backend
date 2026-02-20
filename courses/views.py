@@ -107,6 +107,8 @@ class CourseViewSet(viewsets.ModelViewSet):
             Recursively clone a template resource and its children into target_section.
             Updates existing resources if they are linked to the template.
             """
+            # Always use current DB value for is_visible_to_students (avoids stale/cache issues)
+            template_res.refresh_from_db(fields=['is_visible_to_students'])
             # Check if a clone already exists for this template in this section
             existing = Resource.objects.filter(
                 course_section=target_section,
@@ -124,8 +126,9 @@ class CourseViewSet(viewsets.ModelViewSet):
                     if template_res.file:
                         existing.file = template_res.file
                     existing.position = template_res.position
+                    existing.is_visible_to_students = template_res.is_visible_to_students
                     existing.save(update_fields=[
-                        'type', 'title', 'description', 'url', 'file', 'position'
+                        'type', 'title', 'description', 'url', 'file', 'position', 'is_visible_to_students'
                     ])
 
                 clone = existing
@@ -141,6 +144,7 @@ class CourseViewSet(viewsets.ModelViewSet):
                     url=template_res.url,
                     file=template_res.file,
                     position=template_res.position,
+                    is_visible_to_students=template_res.is_visible_to_students,
                 )
 
             # Sync children (recursively)
@@ -599,23 +603,28 @@ class SubjectGroupViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = super().get_queryset()
+        user = getattr(self.request, 'user', None)
         student_id = self.request.query_params.get('student')
-        if not student_id:
-            return queryset
-        user = self.request.user
-        try:
-            student_id = int(student_id)
-        except (TypeError, ValueError):
-            return queryset
-        if user.role == UserRole.STUDENT:
-            if user.id != student_id:
-                return queryset.none()
-        elif user.role == UserRole.PARENT:
-            if not user.children.filter(id=student_id, role=UserRole.STUDENT).exists():
-                return queryset.none()
-        return queryset.filter(
-            classroom__classroom_users__user_id=student_id
-        ).distinct()
+        if student_id:
+            try:
+                student_id = int(student_id)
+            except (TypeError, ValueError):
+                return queryset
+            if user and user.is_authenticated:
+                if user.role == UserRole.STUDENT:
+                    if user.id != student_id:
+                        return queryset.none()
+                elif user.role == UserRole.PARENT:
+                    if not user.children.filter(id=student_id, role=UserRole.STUDENT).exists():
+                        return queryset.none()
+            return queryset.filter(
+                classroom__classroom_users__user_id=student_id
+            ).distinct()
+        if user and user.is_authenticated and user.role == UserRole.PARENT:
+            return queryset.filter(
+                classroom__classroom_users__user__in=user.children.all()
+            ).distinct()
+        return queryset
 
     def get_permissions(self):
         # Keep SubjectGroup management for superadmins only, but allow role-based access to the
@@ -1061,6 +1070,8 @@ class SubjectGroupViewSet(viewsets.ModelViewSet):
 
         # Helper function for cloning resources (same as in sync_content)
         def clone_resource_tree(template_res: Resource, target_section: CourseSection, parent: Resource | None):
+            # Always use current DB value for is_visible_to_students (avoids stale/cache issues)
+            template_res.refresh_from_db(fields=['is_visible_to_students'])
             existing = Resource.objects.filter(
                 course_section=target_section,
                 template_resource=template_res,
@@ -1075,8 +1086,9 @@ class SubjectGroupViewSet(viewsets.ModelViewSet):
                     if template_res.file:
                         existing.file = template_res.file
                     existing.position = template_res.position
+                    existing.is_visible_to_students = template_res.is_visible_to_students
                     existing.save(
-                        update_fields=['type', 'title', 'description', 'url', 'file', 'position'])
+                        update_fields=['type', 'title', 'description', 'url', 'file', 'position', 'is_visible_to_students'])
                 clone = existing
             else:
                 clone = Resource.objects.create(
@@ -1089,6 +1101,7 @@ class SubjectGroupViewSet(viewsets.ModelViewSet):
                     url=template_res.url,
                     file=template_res.file,
                     position=template_res.position,
+                    is_visible_to_students=template_res.is_visible_to_students,
                 )
                 synced_resources[0] += 1
 

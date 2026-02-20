@@ -47,8 +47,35 @@ def resource_pre_delete(sender, instance, **kwargs):
                 f"File resource '{instance.title}' has file: {instance.file.name}"
             )
             
+        # Delete synced derived resources (clones) before this template resource is deleted
+        if hasattr(instance, 'derived_resources'):
+            synced_clones = instance.derived_resources.filter(is_unlinked_from_template=False)
+            if synced_clones.exists():
+                logger.info(f"Deleting {synced_clones.count()} synced derived resources for template '{instance.title}'")
+                for clone in synced_clones:
+                    clone.delete()
+                    
     except Exception as e:
         logger.error(f"Error in resource_pre_delete signal: {str(e)}")
+
+
+from .models import Assignment
+
+@receiver(pre_delete, sender=Assignment)
+def assignment_pre_delete(sender, instance, **kwargs):
+    """
+    Signal handler for Assignment pre-deletion.
+    Deletes synced derived assignments (clones) before this template assignment is deleted.
+    """
+    try:
+        if hasattr(instance, 'derived_assignments'):
+            synced_clones = instance.derived_assignments.filter(is_unlinked_from_template=False)
+            if synced_clones.exists():
+                logger.info(f"Deleting {synced_clones.count()} synced derived assignments for template '{instance.title}'")
+                for clone in synced_clones:
+                    clone.delete()
+    except Exception as e:
+        logger.error(f"Error in assignment_pre_delete signal: {str(e)}")
 
 
 @receiver(post_delete, sender=Resource)

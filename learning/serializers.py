@@ -6,15 +6,42 @@ from .models import (
 from users.models import UserRole, User
 
 
+def _parse_form_boolean(value):
+    """Parse boolean from form data: 'false'/'true' strings or list of one such string (multipart)."""
+    if value in (True, False):
+        return bool(value)
+    if isinstance(value, list):
+        value = value[0] if value else None
+    if value is None:
+        return None
+    s = str(value).strip().lower()
+    if s in ('true', '1', 'yes'):
+        return True
+    if s in ('false', '0', 'no', ''):
+        return False
+    return None
+
+
+class FormDataBooleanField(serializers.BooleanField):
+    """BooleanField that correctly parses multipart form values like 'false' and ['false']."""
+
+    def to_internal_value(self, data):
+        parsed = _parse_form_boolean(data)
+        if parsed is not None:
+            return parsed
+        return super().to_internal_value(data)
+
+
 class ResourceSerializer(serializers.ModelSerializer):
     children = serializers.SerializerMethodField()
     parent_title = serializers.CharField(source='parent_resource.title', read_only=True)
-    
+    is_visible_to_students = FormDataBooleanField(required=False, default=True)
+
     class Meta:
         model = Resource
-        fields = ['id', 'course_section', 'parent_resource', 'parent_title', 'type', 
+        fields = ['id', 'course_section', 'parent_resource', 'parent_title', 'type',
                  'title', 'description', 'url', 'file', 'position', 'children',
-                 'template_resource', 'is_unlinked_from_template']
+                 'template_resource', 'is_unlinked_from_template', 'is_visible_to_students']
     
     def get_children(self, obj):
         children = obj.children.all().order_by('position', 'id')
@@ -29,7 +56,7 @@ class ResourceTreeSerializer(serializers.ModelSerializer):
     class Meta:
         model = Resource
         fields = ['id', 'type', 'title', 'description', 'url', 'file', 'position', 'children', 'level',
-                 'template_resource', 'is_unlinked_from_template']
+                 'template_resource', 'is_unlinked_from_template', 'is_visible_to_students']
     
     def get_children(self, obj):
         children = obj.children.all().order_by('position', 'id')
@@ -39,9 +66,14 @@ class ResourceTreeSerializer(serializers.ModelSerializer):
         if request and request.user.is_authenticated:
             user = request.user
             if user.role == UserRole.STUDENT:
-                # Filter children based on student's classroom enrollment
+                # Filter children based on student's classroom enrollment and visibility
                 student_classrooms = user.classroom_users.values_list('classroom', flat=True)
-                children = children.filter(course_section__subject_group__classroom__in=student_classrooms)
+                children = children.filter(
+                    course_section__subject_group__classroom__in=student_classrooms,
+                    is_visible_to_students=True
+                )
+            elif user.role == UserRole.PARENT:
+                children = children.filter(is_visible_to_students=True)
         
         return ResourceTreeSerializer(children, many=True, context=self.context).data
     

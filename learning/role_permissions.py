@@ -76,9 +76,15 @@ class RoleBasedPermission(permissions.BasePermission):
         if request.user.role == UserRole.STUDENT:
             return True
 
-        # Parent: spectator mode, read-only
+        # Parent: read-only except forum (can create threads/posts for parent–teacher communication)
         if request.user.role == UserRole.PARENT:
-            return request.method in permissions.SAFE_METHODS
+            if request.method in permissions.SAFE_METHODS:
+                return True
+            if request.method == "POST":
+                cls = getattr(view, "__class__", None)
+                if cls and getattr(cls, "__name__", None) in ("ForumThreadViewSet", "ForumPostViewSet"):
+                    return True
+            return False
         
         return False
     
@@ -102,19 +108,29 @@ class RoleBasedPermission(permissions.BasePermission):
         if user.role == UserRole.TEACHER:
             if hasattr(obj, 'teacher'):
                 return obj.teacher_id == user.id if hasattr(obj, 'teacher_id') else obj.teacher == user
-            
+            # ForumThread/ForumPost: direct_message (no subject_group) — allow if teacher is participant
+            if hasattr(obj, 'participants'):
+                if user in obj.participants.all():
+                    return True
+            if hasattr(obj, 'thread') and hasattr(obj.thread, 'participants'):
+                if obj.thread.subject_group is None and user in obj.thread.participants.all():
+                    return True
             if hasattr(obj, 'subject_group'):
                 # ForumThread: check if teacher is assigned to the subject group
-                try:
-                    return obj.subject_group.teacher_id == user.id
-                except (AttributeError, ValueError):
-                    return False
+                if obj.subject_group is not None:
+                    try:
+                        return obj.subject_group.teacher_id == user.id
+                    except (AttributeError, ValueError):
+                        pass
+                return False
             if hasattr(obj, 'thread'):
                 # ForumPost: check if teacher is assigned to the thread's subject group
                 try:
-                    return obj.thread.subject_group.teacher_id == user.id
+                    if obj.thread.subject_group is not None:
+                        return obj.thread.subject_group.teacher_id == user.id
                 except (AttributeError, ValueError):
-                    return False
+                    pass
+                return False
             if hasattr(obj, 'course_section'):
                 try:
                     return obj.course_section.subject_group.teacher_id == user.id
@@ -229,7 +245,14 @@ class RoleBasedPermission(permissions.BasePermission):
 
             classrooms = set(child_classroom_ids())
 
-            if hasattr(obj, 'subject_group') and hasattr(obj.subject_group, 'classroom'):
+            # Forum thread/post: direct_message (no subject_group) — allow if parent is participant
+            if hasattr(obj, 'participants'):
+                if user in obj.participants.all():
+                    return True
+            if hasattr(obj, 'thread') and hasattr(obj.thread, 'participants'):
+                if obj.thread.subject_group is None and user in obj.thread.participants.all():
+                    return True
+            if hasattr(obj, 'subject_group') and obj.subject_group is not None and hasattr(obj.subject_group, 'classroom'):
                 return obj.subject_group.classroom.id in classrooms
 
             if hasattr(obj, 'course_section') and hasattr(obj.course_section, 'subject_group'):

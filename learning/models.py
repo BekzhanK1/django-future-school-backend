@@ -41,6 +41,10 @@ class Resource(models.Model):
         default=False,
         help_text="If true, this resource is no longer auto-synced from its template.",
     )
+    is_visible_to_students = models.BooleanField(
+        default=True,
+        help_text="If false, this resource is visible only to teachers, school admins, and super admins.",
+    )
 
     class Meta:
         ordering = ["position", "id"]

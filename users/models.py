@@ -53,6 +53,10 @@ class User(AbstractUser):
     role = models.CharField(
         max_length=32, choices=UserRole.choices, default=UserRole.STUDENT)
     is_active = models.BooleanField(default=True)
+    iin = models.CharField(
+        max_length=12, unique=True, null=True, blank=True,
+        help_text="12-digit Individual Identification Number"
+    )
     kundelik_id = models.CharField(
         max_length=255, null=True, blank=True, unique=True)
     school = models.ForeignKey(
