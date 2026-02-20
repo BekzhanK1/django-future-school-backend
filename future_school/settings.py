@@ -31,9 +31,9 @@ SECRET_KEY = os.getenv(
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv("DEBUG", "True").lower() in ("1", "true", "yes")
 
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = [h.strip() for h in (os.getenv("ALLOWED_HOSTS") or "*").split(",")]
 CORS_ALLOW_ALL_ORIGINS = True
 
 

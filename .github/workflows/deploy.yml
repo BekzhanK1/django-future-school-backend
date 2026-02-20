@@ -26,10 +26,9 @@ jobs:
           script: |
             set -euo pipefail
             cd ~/future-school/future-school-backend
-            chmod 755 ~/future-school/future-school-backend/media || true
-            docker compose down || true
+            docker compose -f docker-compose.prod.yml down || true
             git fetch --all
             git checkout main || git checkout -b main
             git pull origin main
-            docker compose up --build -d
+            docker compose -f docker-compose.prod.yml up --build -d
             docker system prune -f || true

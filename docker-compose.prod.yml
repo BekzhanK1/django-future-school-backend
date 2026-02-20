@@ -1,0 +1,47 @@
+# Production: backend :9000 + PostgreSQL. No Redis/Celery.
+# Run from backend repo: docker compose -f docker-compose.prod.yml up --build -d
+# Requires .env with DB_PASSWORD, DJANGO_SECRET_KEY (see .env.prod.example).
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-future_school_db}
+      POSTGRES_USER: ${DB_USER:-future}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-future} -d ${DB_NAME:-future_school_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    environment:
+      DEBUG: "0"
+      DB_NAME: ${DB_NAME:-future_school_db}
+      DB_USER: ${DB_USER:-future}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+      DB_HOST: db
+      DB_PORT: "5432"
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      CELERY_TASK_ALWAYS_EAGER: "true"
+      ALLOWED_HOSTS: "*"
+    volumes:
+      - backend_media:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  backend_media:

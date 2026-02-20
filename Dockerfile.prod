@@ -1,0 +1,23 @@
+# Production backend image: Python, PostgreSQL client libs, Gunicorn
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+RUN mkdir -p /app/data /app/media
+
+ENV PYTHONUNBUFFERED=1
+
+EXPOSE 9000
+
+# Default: run migrations then gunicorn (override in compose if needed)
+CMD ["sh", "-c", "python manage.py migrate --noinput && gunicorn future_school.wsgi:application --bind 0.0.0.0:9000 --workers 2 --threads 2 --timeout 60"]
