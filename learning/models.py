@@ -45,6 +45,12 @@ class Resource(models.Model):
         default=True,
         help_text="If false, this resource is visible only to teachers, school admins, and super admins.",
     )
+    week_day = models.IntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0), MaxValueValidator(6)],
+        help_text="Day of week within the section (0=Monday, 6=Sunday).",
+    )
 
     class Meta:
         ordering = ["position", "id"]

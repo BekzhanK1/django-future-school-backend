@@ -41,7 +41,8 @@ class ResourceSerializer(serializers.ModelSerializer):
         model = Resource
         fields = ['id', 'course_section', 'parent_resource', 'parent_title', 'type',
                  'title', 'description', 'url', 'file', 'position', 'children',
-                 'template_resource', 'is_unlinked_from_template', 'is_visible_to_students']
+                 'template_resource', 'is_unlinked_from_template', 'is_visible_to_students',
+                 'week_day']
     
     def get_children(self, obj):
         children = obj.children.all().order_by('position', 'id')
@@ -56,7 +57,7 @@ class ResourceTreeSerializer(serializers.ModelSerializer):
     class Meta:
         model = Resource
         fields = ['id', 'type', 'title', 'description', 'url', 'file', 'position', 'children', 'level',
-                 'template_resource', 'is_unlinked_from_template', 'is_visible_to_students']
+                 'template_resource', 'is_unlinked_from_template', 'is_visible_to_students', 'week_day']
     
     def get_children(self, obj):
         children = obj.children.all().order_by('position', 'id')

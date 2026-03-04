@@ -9,9 +9,9 @@ class IINAuthBackend(ModelBackend):
         if username is None:
             username = kwargs.get(User.USERNAME_FIELD)
         try:
-            # Check if username matches an IIN (12 digits), an email, or a username
+            # Check if username matches an email, or a username
             user = User.objects.get(
-                Q(username=username) | Q(email=username) | Q(iin=username)
+                Q(username=username) | Q(email=username)
             )
         except User.DoesNotExist:
             # Run the default password hasher once to reduce the timing

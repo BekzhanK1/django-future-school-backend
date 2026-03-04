@@ -28,6 +28,7 @@ class SubjectGroup(models.Model):
     teacher = models.ForeignKey("users.User", on_delete=models.SET_NULL,
                                 null=True, blank=True, related_name="subject_groups")
     external_id = models.CharField(max_length=255, null=True, blank=True)
+    color = models.CharField(max_length=7, null=True, blank=True, help_text="Custom hex color, e.g. #FF5733")
 
     class Meta:
         constraints = [

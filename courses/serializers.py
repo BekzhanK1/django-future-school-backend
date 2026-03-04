@@ -79,6 +79,9 @@ class ScheduleSlotSerializer(serializers.ModelSerializer):
     subject_group_teacher_username = serializers.CharField(
         source='subject_group.teacher.username', read_only=True
     )
+    subject_group_color = serializers.CharField(
+        source='subject_group.color', read_only=True
+    )
     
     class Meta:
         model = ScheduleSlot
@@ -89,6 +92,7 @@ class ScheduleSlotSerializer(serializers.ModelSerializer):
             'subject_group_classroom_display',
             'subject_group_teacher_fullname',
             'subject_group_teacher_username',
+            'subject_group_color',
             'day_of_week',
             'day_of_week_display',
             'start_time',
@@ -128,7 +132,7 @@ class SubjectGroupSerializer(serializers.ModelSerializer):
     class Meta:
         model = SubjectGroup
         fields = ['id', 'course', 'classroom', 'teacher', 'course_name', 'course_code',
-                  'classroom_display', 'teacher_username', 'teacher_fullname', 'teacher_email', 'external_id', 'online_meeting', 'schedule_slots']
+                  'classroom_display', 'teacher_username', 'teacher_fullname', 'teacher_email', 'external_id', 'online_meeting', 'schedule_slots', 'color']
 
 
 class CourseSectionSerializer(serializers.ModelSerializer):
