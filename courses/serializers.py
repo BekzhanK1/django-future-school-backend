@@ -1,9 +1,10 @@
 from rest_framework import serializers
 from datetime import datetime, timedelta
 from django.utils import timezone
+from django.db import transaction
 from .models import Course, SubjectGroup, CourseSection
 from .models_schedule import ScheduleSlot, DayOfWeek
-from .models_academic_year import AcademicYear, Holiday
+from .models_academic_year import AcademicYear, Holiday, Quarter
 from microsoft_graph.serializers import ShortOnlineMeetingSerializer
 
 
@@ -33,9 +34,28 @@ class HolidaySerializer(serializers.ModelSerializer):
         ]
 
 
+class QuarterSerializer(serializers.ModelSerializer):
+    """Serializer for quarter"""
+    class Meta:
+        model = Quarter
+        fields = [
+            'id',
+            'quarter_index',
+            'start_date',
+            'end_date',
+        ]
+        read_only_fields = ['id', 'quarter_index']
+
+
 class AcademicYearSerializer(serializers.ModelSerializer):
     """Serializer for academic year"""
     additional_holidays = HolidaySerializer(many=True, read_only=True)
+    quarters = QuarterSerializer(many=True, required=False)
+    
+    quarter1_weeks = serializers.IntegerField(write_only=True, required=False, default=8)
+    quarter2_weeks = serializers.IntegerField(write_only=True, required=False, default=8)
+    quarter3_weeks = serializers.IntegerField(write_only=True, required=False, default=10)
+    quarter4_weeks = serializers.IntegerField(write_only=True, required=False, default=8)
     
     class Meta:
         model = AcademicYear
@@ -44,6 +64,7 @@ class AcademicYearSerializer(serializers.ModelSerializer):
             'name',
             'start_date',
             'end_date',
+            'quarters',
             'quarter1_weeks',
             'quarter2_weeks',
             'quarter3_weeks',
@@ -60,6 +81,71 @@ class AcademicYearSerializer(serializers.ModelSerializer):
             'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    @transaction.atomic
+    def create(self, validated_data):
+        # Extract week counts
+        weeks = [
+            validated_data.pop('quarter1_weeks', 8),
+            validated_data.pop('quarter2_weeks', 8),
+            validated_data.pop('quarter3_weeks', 10),
+            validated_data.pop('quarter4_weeks', 8),
+        ]
+        quarters_data = validated_data.pop('quarters', None)
+        
+        academic_year = super().create(validated_data)
+        
+        # Calculate quarters from weeks
+        current_date = academic_year.start_date
+        for q in range(1, 5):
+            quarter_weeks = weeks[q - 1]
+            days_to_add = quarter_weeks * 7
+            quarter_end = current_date + timedelta(days=days_to_add - 1)
+            
+            # Adjust for holidays in Q1
+            if q == 1 and academic_year.autumn_holiday_start and academic_year.autumn_holiday_end:
+                if academic_year.autumn_holiday_start <= quarter_end:
+                    days_to_add += (academic_year.autumn_holiday_end - academic_year.autumn_holiday_start).days + 1
+            
+            quarter_end = current_date + timedelta(days=days_to_add - 1)
+            
+            Quarter.objects.create(
+                academic_year=academic_year,
+                quarter_index=q,
+                start_date=current_date,
+                end_date=quarter_end
+            )
+            
+            current_date = quarter_end + timedelta(days=1)
+            
+        return academic_year
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        quarters_data = validated_data.pop('quarters', None)
+        
+        # Pop write-only week fields in case frontend still sends them on update
+        validated_data.pop('quarter1_weeks', None)
+        validated_data.pop('quarter2_weeks', None)
+        validated_data.pop('quarter3_weeks', None)
+        validated_data.pop('quarter4_weeks', None)
+
+        instance = super().update(instance, validated_data)
+
+        if quarters_data is not None:
+            # Map existing quarters by index
+            existing_quarters = {q.quarter_index: q for q in instance.quarters.all()}
+            for i, q_data in enumerate(quarters_data):
+                # The frontend might just pass the list of 4 quarters in order.
+                # Assuming quarters_data has the same indices 1 to 4 or based on order.
+                q_idx = q_data.get('quarter_index', i + 1)
+                quarter = existing_quarters.get(q_idx)
+                if quarter:
+                    quarter.start_date = q_data.get('start_date', quarter.start_date)
+                    quarter.end_date = q_data.get('end_date', quarter.end_date)
+                    quarter.save()
+                    
+        return instance
 
 
 class ScheduleSlotSerializer(serializers.ModelSerializer):

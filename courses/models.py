@@ -140,4 +140,4 @@ class CourseSection(models.Model):
 # Import schedule models
 from .models_schedule import ScheduleSlot, DayOfWeek  # noqa: F401
 # Import academic year models
-from .models_academic_year import AcademicYear, Holiday  # noqa: F401
+from .models_academic_year import AcademicYear, Holiday, Quarter  # noqa: F401

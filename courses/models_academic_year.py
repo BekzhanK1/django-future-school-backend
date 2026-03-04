@@ -19,11 +19,8 @@ class AcademicYear(models.Model):
         help_text="End of academic year (typically May 25)"
     )
     
-    # Quarter durations in weeks
-    quarter1_weeks = models.PositiveSmallIntegerField(default=8)
-    quarter2_weeks = models.PositiveSmallIntegerField(default=8)
-    quarter3_weeks = models.PositiveSmallIntegerField(default=10)
-    quarter4_weeks = models.PositiveSmallIntegerField(default=8)
+    # Quarters are now managed by the Quarter model and its objects
+
     
     # Holidays
     autumn_holiday_start = models.DateField(
@@ -107,40 +104,14 @@ class AcademicYear(models.Model):
     
     def get_quarter_dates(self, quarter: int):
         """Calculate start and end dates for a quarter"""
-        from datetime import timedelta
-        
         if quarter < 1 or quarter > 4:
             raise ValueError("Quarter must be between 1 and 4")
-        
-        weeks_per_quarter = [
-            self.quarter1_weeks,
-            self.quarter2_weeks,
-            self.quarter3_weeks,
-            self.quarter4_weeks,
-        ]
-        
-        current_date = self.start_date
-        for q in range(1, quarter + 1):
-            quarter_start = current_date
-            quarter_weeks = weeks_per_quarter[q - 1]
             
-            # Skip holidays if they fall within this quarter
-            days_to_add = quarter_weeks * 7
-            quarter_end = current_date + timedelta(days=days_to_add - 1)
-            
-            # Adjust for holidays
-            if q == 1 and self.autumn_holiday_start and self.autumn_holiday_end:
-                if self.autumn_holiday_start <= quarter_end:
-                    days_to_add += (self.autumn_holiday_end - self.autumn_holiday_start).days + 1
-            
-            quarter_end = current_date + timedelta(days=days_to_add - 1)
-            
-            if q == quarter:
-                return quarter_start, quarter_end
-            
-            current_date = quarter_end + timedelta(days=1)
-        
-        return None, None
+        try:
+            q_obj = self.quarters.get(quarter_index=quarter)
+            return q_obj.start_date, q_obj.end_date
+        except:
+            return None, None
     
     def is_holiday(self, date):
         """Check if a date is a holiday"""
@@ -165,6 +136,56 @@ class AcademicYear(models.Model):
     
     def __str__(self):
         return f"{self.name} ({self.start_date} - {self.end_date})"
+
+
+class Quarter(models.Model):
+    """
+    Represents a specific quarter within an academic year.
+    """
+    QUARTER_CHOICES = [
+        (1, '1 четверть'),
+        (2, '2 четверть'),
+        (3, '3 четверть'),
+        (4, '4 четверть'),
+    ]
+
+    academic_year = models.ForeignKey(
+        AcademicYear,
+        on_delete=models.CASCADE,
+        related_name='quarters'
+    )
+    quarter_index = models.PositiveSmallIntegerField(
+        choices=QUARTER_CHOICES,
+        help_text="Quarter index (1 to 4)"
+    )
+    start_date = models.DateField()
+    end_date = models.DateField()
+
+    class Meta:
+        ordering = ['academic_year', 'quarter_index']
+        unique_together = ['academic_year', 'quarter_index']
+        verbose_name = "Quarter"
+        verbose_name_plural = "Quarters"
+
+    def clean(self):
+        if self.end_date and self.start_date:
+            if self.end_date <= self.start_date:
+                raise ValidationError({
+                    'end_date': 'End date must be after start date.'
+                })
+            # Ensure within academic year
+            if self.academic_year:
+                if self.start_date < self.academic_year.start_date or self.end_date > self.academic_year.end_date:
+                    raise ValidationError(
+                        "Quarter dates must be within the academic year bounds."
+                    )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.get_quarter_index_display()} - {self.academic_year.name}"
 
 
 class Holiday(models.Model):

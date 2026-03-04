@@ -1669,7 +1669,7 @@ class AcademicYearViewSet(viewsets.ModelViewSet):
     ViewSet for managing academic years.
     """
     queryset = AcademicYear.objects.prefetch_related(
-        'additional_holidays').all()
+        'additional_holidays', 'quarters').all()
     serializer_class = AcademicYearSerializer
     permission_classes = [IsSuperAdmin]
     filter_backends = [DjangoFilterBackend, OrderingFilter]

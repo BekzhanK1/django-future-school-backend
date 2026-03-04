@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Course, SubjectGroup, CourseSection, ScheduleSlot, AcademicYear, Holiday
+from .models import Course, SubjectGroup, CourseSection, ScheduleSlot, AcademicYear, Holiday, Quarter
 
 
 @admin.register(Course)
@@ -57,3 +57,11 @@ class AcademicYearAdmin(admin.ModelAdmin):
     list_filter = ('start_date', 'end_date')
     search_fields = ('name',)
     ordering = ('start_date', 'id')
+
+
+@admin.register(Quarter)
+class QuarterAdmin(admin.ModelAdmin):
+    list_display = ('academic_year', 'quarter_index', 'start_date', 'end_date')
+    list_filter = ('academic_year', 'quarter_index')
+    search_fields = ('academic_year__name',)
+    ordering = ('academic_year', 'quarter_index')
