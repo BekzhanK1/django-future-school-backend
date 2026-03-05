@@ -41,3 +41,4 @@ vine==5.1.0
 wcwidth==0.6.0
 whitenoise==6.8.2
 PyMuPDF==1.27.1
+openai==2.24.0
