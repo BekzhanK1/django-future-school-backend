@@ -624,6 +624,11 @@ class SubjectGroupViewSet(viewsets.ModelViewSet):
             return queryset.filter(
                 classroom__classroom_users__user__in=user.children.all()
             ).distinct()
+            
+        is_teacher = self.request.query_params.get('is_teacher')
+        if is_teacher and is_teacher.lower() == 'true' and user and user.is_authenticated:
+            return queryset.filter(teacher=user)
+            
         return queryset
 
     def get_permissions(self):

@@ -141,3 +141,5 @@ class CourseSection(models.Model):
 from .models_schedule import ScheduleSlot, DayOfWeek  # noqa: F401
 # Import academic year models
 from .models_academic_year import AcademicYear, Holiday, Quarter  # noqa: F401
+# Import KTP models
+from .models_ktp import AcademicPlan, PlanSubjectGroup, PlanQuarterDetail, Section, LearningObjective, Lesson  # noqa: F401

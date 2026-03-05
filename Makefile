@@ -1,14 +1,16 @@
+SHELL := /bin/bash
+
 run:
-	python3 manage.py runserver
+	source .venv/bin/activate && python3 manage.py runserver
 
 makemigrations:
-	python3 manage.py makemigrations
+	source .venv/bin/activate && python3 manage.py makemigrations
 
 migrate:
-	python3 manage.py migrate
+	source .venv/bin/activate && python3 manage.py migrate
 
 shell:
-	python3 manage.py shell
+	source .venv/bin/activate && python3 manage.py shell
 
 createsuperuser:
-	python3 manage.py createsuperuser
+	source .venv/bin/activate && python3 manage.py createsuperuser

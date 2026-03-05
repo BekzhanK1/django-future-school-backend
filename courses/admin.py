@@ -1,5 +1,6 @@
 from django.contrib import admin
 from .models import Course, SubjectGroup, CourseSection, ScheduleSlot, AcademicYear, Holiday, Quarter
+from .models_ktp import AcademicPlan, PlanSubjectGroup, PlanQuarterDetail, Section, LearningObjective, Lesson
 
 
 @admin.register(Course)
@@ -65,3 +66,32 @@ class QuarterAdmin(admin.ModelAdmin):
     list_filter = ('academic_year', 'quarter_index')
     search_fields = ('academic_year__name',)
     ordering = ('academic_year', 'quarter_index')
+
+@admin.register(AcademicPlan)
+class AcademicPlanAdmin(admin.ModelAdmin):
+    list_display = ('course', 'teacher_name', 'academic_year', 'school_name')
+    list_filter = ('school_name', 'academic_year', 'course')
+    search_fields = ('teacher_name', 'course__name')
+
+@admin.register(PlanSubjectGroup)
+class PlanSubjectGroupAdmin(admin.ModelAdmin):
+    list_display = ('plan', 'subject_group')
+
+@admin.register(PlanQuarterDetail)
+class PlanQuarterDetailAdmin(admin.ModelAdmin):
+    list_display = ('plan', 'quarter', 'sor_count', 'soch_count', 'total_hours')
+
+@admin.register(Section)
+class SectionAdmin(admin.ModelAdmin):
+    list_display = ('section_name', 'plan_quarter_detail', 'order')
+    list_filter = ('plan_quarter_detail__plan__academic_year',)
+
+@admin.register(LearningObjective)
+class LearningObjectiveAdmin(admin.ModelAdmin):
+    list_display = ('code', 'description')
+    search_fields = ('code', 'description')
+
+@admin.register(Lesson)
+class LessonAdmin(admin.ModelAdmin):
+    list_display = ('topic', 'lesson_number', 'section', 'hours', 'scheduled_date')
+    list_filter = ('section__plan_quarter_detail__plan',)
