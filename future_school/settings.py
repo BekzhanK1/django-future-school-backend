@@ -257,14 +257,15 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 
 
-if DEBUG:
-    SIMPLE_JWT = {
-        "ACCESS_TOKEN_LIFETIME": timedelta(hours=2),
-    }
-else:
-    SIMPLE_JWT = {
-        "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
-    }
+SIMPLE_JWT = {
+    # 7 days
+    "ACCESS_TOKEN_LIFETIME": timedelta(days=7),
+    # 30 days
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
+    # опционально, но обычно так:
+    "ROTATE_REFRESH_TOKENS": False,
+    "BLACKLIST_AFTER_ROTATION": True,
+}
 
 
 SPECTACULAR_SETTINGS = {
