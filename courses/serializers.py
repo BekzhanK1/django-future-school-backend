@@ -2,6 +2,7 @@ from rest_framework import serializers
 from datetime import datetime, timedelta
 from django.utils import timezone
 from django.db import transaction
+from django.db.models import Q
 from .models import Course, SubjectGroup, CourseSection
 from .models_schedule import ScheduleSlot, DayOfWeek
 from .models_academic_year import AcademicYear, Holiday, Quarter
@@ -159,6 +160,9 @@ class ScheduleSlotSerializer(serializers.ModelSerializer):
     subject_group_classroom_display = serializers.CharField(
         source='subject_group.classroom.__str__', read_only=True
     )
+    subject_group_classroom_id = serializers.IntegerField(
+        source='subject_group.classroom.id', read_only=True
+    )
     subject_group_teacher_fullname = serializers.CharField(
         source='subject_group.teacher.get_full_name', read_only=True
     )
@@ -176,6 +180,7 @@ class ScheduleSlotSerializer(serializers.ModelSerializer):
             'subject_group',
             'subject_group_course_name',
             'subject_group_classroom_display',
+            'subject_group_classroom_id',
             'subject_group_teacher_fullname',
             'subject_group_teacher_username',
             'subject_group_color',
@@ -191,6 +196,68 @@ class ScheduleSlotSerializer(serializers.ModelSerializer):
             'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def validate(self, attrs):
+        """
+        Prevent time clashes:
+        - for the same classroom
+        - for the same teacher
+        on the same day_of_week, when time ranges overlap.
+        """
+        attrs = super().validate(attrs)
+
+        subject_group = attrs.get('subject_group') or getattr(self.instance, 'subject_group', None)
+        if subject_group is None:
+            raise serializers.ValidationError({'detail': 'subject_group is required'})
+
+        day_of_week = attrs.get('day_of_week') or getattr(self.instance, 'day_of_week', None)
+        start_time = attrs.get('start_time') or getattr(self.instance, 'start_time', None)
+        end_time = attrs.get('end_time') or getattr(self.instance, 'end_time', None)
+
+        if start_time and end_time and start_time >= end_time:
+            raise serializers.ValidationError({'detail': 'end_time must be later than start_time'})
+
+        if day_of_week is None or start_time is None or end_time is None:
+            return attrs
+
+        classroom = subject_group.classroom
+        teacher = subject_group.teacher
+
+        # Build base queryset: same day, overlapping time
+        qs = ScheduleSlot.objects.filter(day_of_week=day_of_week)
+        if self.instance is not None:
+            qs = qs.exclude(pk=self.instance.pk)
+
+        # Overlap condition: existing.start < new_end AND existing.end > new_start
+        qs = qs.filter(start_time__lt=end_time, end_time__gt=start_time)
+
+        # Conflicts for same classroom or same teacher
+        conflict_filter = Q()
+        if classroom_id := getattr(classroom, 'id', None):
+            conflict_filter |= Q(subject_group__classroom_id=classroom_id)
+        if teacher_id := getattr(teacher, 'id', None):
+            conflict_filter |= Q(subject_group__teacher_id=teacher_id)
+
+        if conflict_filter:
+            conflicts = qs.filter(conflict_filter).select_related('subject_group__course', 'subject_group__classroom', 'subject_group__teacher')
+            if conflicts.exists():
+                conflict = conflicts.first()
+                parts = []
+                if conflict.subject_group.teacher:
+                    parts.append(
+                        f'учитель {conflict.subject_group.teacher.get_full_name() or conflict.subject_group.teacher.username}'
+                    )
+                if conflict.subject_group.classroom:
+                    parts.append(f'класс {conflict.subject_group.classroom}')
+                msg_suffix = f" ({', '.join(parts)})" if parts else ''
+                raise serializers.ValidationError(
+                    {
+                        'detail': f'Конфликт расписания: в это время уже есть урок{msg_suffix}.',
+                        'code': 'time_clash',
+                    }
+                )
+
+        return attrs
 
 
 class SubjectGroupSerializer(serializers.ModelSerializer):

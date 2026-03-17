@@ -719,6 +719,7 @@ class SubjectGroupViewSet(viewsets.ModelViewSet):
 
                     if existing:
                         results['skipped'].append({
+                            'id': existing.id,
                             'course_id': course.id,
                             'course_name': course.name,
                             'classroom_id': classroom.id,
@@ -1752,6 +1753,56 @@ class ScheduleSlotViewSet(viewsets.ModelViewSet):
             'subject_group__classroom',
             'subject_group__teacher'
         )
+
+    @action(detail=False, methods=['get'], url_path='by-teacher')
+    def by_teacher(self, request):
+        """
+        Return all schedule slots for a given teacher across all subject groups.
+        Query params:
+          - teacher_id: ID of User (required)
+        """
+        teacher_id = request.query_params.get('teacher_id')
+        if not teacher_id:
+            return Response(
+                {'error': 'teacher_id query parameter is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            teacher_id_int = int(teacher_id)
+        except (TypeError, ValueError):
+            return Response(
+                {'error': 'teacher_id must be an integer'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        qs = self.get_queryset().filter(subject_group__teacher_id=teacher_id_int)
+        serializer = self.get_serializer(qs, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='by-classroom')
+    def by_classroom(self, request):
+        """
+        Return all schedule slots for a given classroom across all subject groups.
+        Query params:
+          - classroom_id: ID of Classroom (required)
+        """
+        classroom_id = request.query_params.get('classroom_id')
+        if not classroom_id:
+            return Response(
+                {'error': 'classroom_id query parameter is required'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            classroom_id_int = int(classroom_id)
+        except (TypeError, ValueError):
+            return Response(
+                {'error': 'classroom_id must be an integer'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        qs = self.get_queryset().filter(subject_group__classroom_id=classroom_id_int)
+        serializer = self.get_serializer(qs, many=True)
+        return Response(serializer.data)
 
     @action(detail=False, methods=['post'], url_path='copy-schedule')
     def copy_schedule(self, request):
