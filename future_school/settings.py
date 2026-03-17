@@ -10,10 +10,11 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
-from pathlib import Path
-from dotenv import load_dotenv
 import os
 from datetime import timedelta
+from pathlib import Path
+
+from dotenv import load_dotenv
 
 load_dotenv()
 
@@ -34,7 +35,20 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 DEBUG = os.getenv("DEBUG", "True").lower() in ("1", "true", "yes")
 
 ALLOWED_HOSTS = [h.strip() for h in (os.getenv("ALLOWED_HOSTS") or "*").split(",")]
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_ALL_ORIGINS = False
+
+if not DEBUG:
+    # Указываем Django, что мы за прокси, который терминирует SSL
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    
+    # Куки должны передаваться только по HTTPS
+    CSRF_COOKIE_SECURE = True
+    SESSION_COOKIE_SECURE = True
+
+CSRF_TRUSTED_ORIGINS = [
+    FRONTEND_URL,
+    "https://api.future-school.kz",
+]
 
 
 # Application definition
