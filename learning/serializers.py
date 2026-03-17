@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from .models import (
     Resource, Assignment, AssignmentAttachment, Submission, SubmissionAttachment,
-    Grade, ManualGrade, ManualGradeType, GradeWeight, Attendance, AttendanceRecord, Event,
+    Grade, ManualGrade, ManualGradeType, GradeCategory, Attendance, AttendanceRecord, Event,
 )
 from users.models import UserRole, User
 
@@ -285,69 +285,69 @@ class ManualGradeSerializer(serializers.ModelSerializer):
     student_username = serializers.CharField(source='student.username', read_only=True)
     student_first_name = serializers.CharField(source='student.first_name', read_only=True)
     student_last_name = serializers.CharField(source='student.last_name', read_only=True)
-    subject_group_display = serializers.SerializerMethodField()
-    course_section_title = serializers.CharField(source='course_section.title', read_only=True, allow_null=True)
-    graded_by_username = serializers.CharField(source='graded_by.username', read_only=True)
     grade_type_display = serializers.CharField(source='get_grade_type_display', read_only=True)
-
-    def get_subject_group_display(self, obj):
-        return str(obj.subject_group) if obj.subject_group else None
+    graded_by_username = serializers.CharField(source='graded_by.username', read_only=True)
 
     class Meta:
         model = ManualGrade
         fields = [
-            'id', 'student', 'subject_group', 'course_section',
-            'value', 'max_value', 'title', 'grade_type', 'grade_type_display',
-            'graded_by', 'graded_at', 'feedback',
-            'student_username', 'student_first_name', 'student_last_name',
-            'subject_group_display', 'course_section_title', 'graded_by_username',
+            'id', 'student', 'student_username', 'student_first_name', 'student_last_name',
+            'subject_group', 'course_section', 'value', 'max_value',
+            'title', 'grade_type', 'grade_type_display', 
+            'category', 'weight_in_category',
+            'graded_by', 'graded_by_username', 'graded_at', 'feedback'
         ]
-        read_only_fields = ['graded_at', 'graded_by']
-
-    def create(self, validated_data):
-        validated_data['graded_by'] = self.context['request'].user
-        return super().create(validated_data)
+        read_only_fields = ['graded_by', 'graded_at']
 
 
-class GradeWeightSerializer(serializers.ModelSerializer):
-    source_type_display = serializers.CharField(source='get_source_type_display', read_only=True)
+class BulkManualGradeItemSerializer(serializers.Serializer):
+    student_id = serializers.IntegerField()
+    value = serializers.IntegerField(required=False, allow_null=True)
+    max_value = serializers.IntegerField(required=False, allow_null=True)
+    grade_type = serializers.ChoiceField(choices=ManualGradeType.choices, required=False, allow_null=True)
+    category_id = serializers.IntegerField(required=False, allow_null=True)
+    weight_in_category = serializers.IntegerField(required=False, allow_null=True)
 
+
+class BulkManualGradeCreateUpdateSerializer(serializers.Serializer):
+    subject_group_id = serializers.IntegerField()
+    course_section_id = serializers.IntegerField(required=False, allow_null=True)
+    graded_at = serializers.DateField(required=True)
+    grades = BulkManualGradeItemSerializer(many=True)
+
+
+class GradeCategorySerializer(serializers.ModelSerializer):
     class Meta:
-        model = GradeWeight
-        fields = ['id', 'subject_group', 'source_type', 'source_type_display', 'weight']
+        model = GradeCategory
+        fields = ['id', 'subject_group', 'name', 'weight', 'is_formative']
 
     def validate(self, attrs):
-        subject_group_id = attrs.get('subject_group') or (self.instance and self.instance.subject_group_id)
-        source_type = attrs.get('source_type') or (self.instance and self.instance.source_type)
+        subject_group = attrs.get('subject_group') or (self.instance and self.instance.subject_group)
+        is_formative = attrs.get('is_formative', False)
+        if self.instance:
+            if 'is_formative' not in attrs:
+                is_formative = self.instance.is_formative
+        
+        if is_formative and subject_group:
+            qs = GradeCategory.objects.filter(subject_group=subject_group, is_formative=True)
+            if self.instance:
+                qs = qs.exclude(id=self.instance.id)
+            if qs.exists():
+                raise serializers.ValidationError({"is_formative": "Категория Формативного оценивания уже существует для этой группы."})
+
+        # Validate total weight doesn't exceed 100
         weight = attrs.get('weight')
         if weight is None and self.instance:
             weight = self.instance.weight
-        if subject_group_id is not None and weight is not None and source_type:
-            from .models import GradeWeight
-            current = dict(
-                GradeWeight.objects.filter(subject_group_id=subject_group_id).values_list('source_type', 'weight')
-            )
-            current[source_type] = weight
-            if set(current.keys()) == {'assignment', 'test', 'manual'} and sum(current.values()) != 100:
-                raise serializers.ValidationError(
-                    {'weight': 'Сумма весов по предмету должна быть 100%.'}
-                )
-        return attrs
+        
+        if subject_group and weight is not None:
+            qs = GradeCategory.objects.filter(subject_group=subject_group)
+            if self.instance:
+                qs = qs.exclude(id=self.instance.id)
+            total = sum(qs.values_list('weight', flat=True)) + weight
+            if total > 100:
+                raise serializers.ValidationError({"weight": f"Суммарный вес категорий ({total}%) превышает 100%."})
 
-
-class GradeWeightBulkSerializer(serializers.Serializer):
-    """Сохранение всех трёх весов одним запросом (сумма должна быть 100%)."""
-    subject_group = serializers.IntegerField()
-    assignment = serializers.IntegerField(min_value=0, max_value=100)
-    test = serializers.IntegerField(min_value=0, max_value=100)
-    manual = serializers.IntegerField(min_value=0, max_value=100)
-
-    def validate(self, attrs):
-        total = attrs['assignment'] + attrs['test'] + attrs['manual']
-        if total != 100:
-            raise serializers.ValidationError(
-                {'assignment': 'Сумма весов по предмету должна быть 100%.'}
-            )
         return attrs
 
 

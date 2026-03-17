@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import (
     Resource, Assignment, AssignmentAttachment, Submission,
-    SubmissionAttachment, Grade, ManualGrade, GradeWeight, Attendance, AttendanceRecord,
+    SubmissionAttachment, Grade, ManualGrade, GradeCategory, Attendance, AttendanceRecord,
 )
 
 
@@ -95,11 +95,11 @@ class ManualGradeAdmin(admin.ModelAdmin):
     date_hierarchy = 'graded_at'
 
 
-@admin.register(GradeWeight)
-class GradeWeightAdmin(admin.ModelAdmin):
-    list_display = ('id', 'subject_group', 'source_type', 'weight')
-    list_filter = ('source_type', 'subject_group__course')
-    search_fields = ('subject_group__course__name',)
+@admin.register(GradeCategory)
+class GradeCategoryAdmin(admin.ModelAdmin):
+    list_display = ('subject_group', 'name', 'weight', 'is_formative')
+    list_filter = ('is_formative', 'subject_group__course')
+    search_fields = ('name', 'subject_group__course__name')
     autocomplete_fields = ('subject_group',)
 
 

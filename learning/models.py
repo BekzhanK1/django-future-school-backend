@@ -242,6 +242,19 @@ class ManualGrade(models.Model):
         choices=ManualGradeType.choices,
         default=ManualGradeType.OTHER,
     )
+    category = models.ForeignKey(
+        "learning.GradeCategory",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="manual_grades",
+        help_text="Категория оценки",
+    )
+    weight_in_category = models.PositiveSmallIntegerField(
+        default=100,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        help_text="Вес этой оценки внутри категории (в процентах)",
+    )
     graded_by = models.ForeignKey(
         "users.User", on_delete=models.CASCADE, related_name="given_manual_grades"
     )
@@ -259,43 +272,39 @@ class ManualGrade(models.Model):
         return f"{self.student.username}: {self.value}/{self.max_value} ({self.title or self.get_grade_type_display()})"
 
 
-class GradeWeightSourceType(models.TextChoices):
-    """Тип источника оценки для веса."""
-    ASSIGNMENT = "assignment", "Задание"
-    TEST = "test", "Тест"
-    MANUAL = "manual", "Ручная оценка"
-
-
-class GradeWeight(models.Model):
+class GradeCategory(models.Model):
     """
-    Вес типа оценки по предметной группе в процентах (0–100).
-    Сумма весов по трём типам (задание, тест, ручная) должна быть 100%.
+    Категория оценок (например, "ФО", "Экзамен 1").
+    Определяет вес в итоговой оценке за курс.
     """
     subject_group = models.ForeignKey(
-        "courses.SubjectGroup", on_delete=models.CASCADE, related_name="grade_weights"
+        "courses.SubjectGroup", on_delete=models.CASCADE, related_name="grade_categories"
     )
-    source_type = models.CharField(
-        max_length=32,
-        choices=GradeWeightSourceType.choices,
-        help_text="Тип оценки: задание, тест или ручная.",
+    name = models.CharField(
+        max_length=255, help_text="Название категории (например: ФО, Экзамен 1)"
     )
     weight = models.PositiveSmallIntegerField(
-        default=34,
+        default=0,
         validators=[MinValueValidator(0), MaxValueValidator(100)],
-        help_text="Вес в процентах (0–100). Сумма по трём типам = 100%.",
+        help_text="Вес категории в процентах от итоговой оценки",
+    )
+    is_formative = models.BooleanField(
+        default=False,
+        help_text="Является ли эта категория Формативным оцениванием (ФО)",
     )
 
     class Meta:
+        ordering = ['subject_group', '-is_formative', 'name']
         constraints = [
             models.UniqueConstraint(
-                fields=["subject_group", "source_type"],
-                name="unique_subject_group_source_type",
-            ),
+                fields=['subject_group'],
+                condition=models.Q(is_formative=True),
+                name='unique_formative_category_per_group'
+            )
         ]
-        ordering = ["subject_group", "source_type"]
 
     def __str__(self):
-        return f"{self.subject_group} / {self.get_source_type_display()}: {self.weight}"
+        return f"{self.subject_group.course.name} - {self.name}: {self.weight}%"
 
 
 class AttendanceStatus(models.TextChoices):

@@ -12,12 +12,12 @@ import io
 import os
 from .models import (
     Resource, Assignment, AssignmentAttachment, Submission, SubmissionAttachment,
-    Grade, ManualGrade, GradeWeight, Attendance, AttendanceRecord, AttendanceStatus,
+    Grade, ManualGrade, GradeCategory, Attendance, AttendanceRecord, AttendanceStatus, ManualGradeType
 )
 from .serializers import (
     ResourceSerializer, ResourceTreeSerializer, AssignmentSerializer, AssignmentAttachmentSerializer,
     SubmissionSerializer, SubmissionAttachmentSerializer, GradeSerializer, BulkGradeSerializer,
-    ManualGradeSerializer, GradeWeightSerializer, GradeWeightBulkSerializer,
+    ManualGradeSerializer, BulkManualGradeCreateUpdateSerializer, GradeCategorySerializer,
     AttendanceSerializer, AttendanceCreateSerializer, AttendanceUpdateSerializer,
     StudentAttendanceHistorySerializer, AttendanceMetricsSerializer,
 )
@@ -1020,6 +1020,135 @@ class ManualGradeViewSet(viewsets.ModelViewSet):
             self.request.user,
         )
 
+    @action(detail=False, methods=['get'], url_path='by-date')
+    def by_date(self, request):
+        """
+        Fetch formative assessment (MANUAL) grades for a specific subject group and date.
+        Params:
+        - subject_group_id
+        - date (YYYY-MM-DD)
+        """
+        subject_group_id = request.query_params.get('subject_group_id')
+        date_str = request.query_params.get('date')
+
+        if not subject_group_id or not date_str:
+            return Response(
+                {'error': 'Both subject_group_id and date query parameters are required.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        except ValueError:
+            return Response({'error': 'Invalid date format. Use YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        grades = self.get_queryset().filter(
+            subject_group_id=subject_group_id,
+            graded_at__date=target_date,
+            grade_type=ManualGradeType.LESSON
+        )
+
+        serializer = self.get_serializer(grades, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], url_path='bulk-create-or-update')
+    def bulk_create_or_update(self, request):
+        """
+        Bulk create or update formative assignments (MANUAL) grades for a subject group and date.
+        """
+        serializer = BulkManualGradeCreateUpdateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        data = serializer.validated_data
+        subject_group_id = data['subject_group_id']
+        course_section_id = data.get('course_section_id')
+        graded_at_date = data['graded_at']
+        grades_data = data['grades']
+
+        # Permission check
+        user = request.user
+        from courses.models import SubjectGroup
+        try:
+            subject_group = SubjectGroup.objects.get(pk=subject_group_id)
+        except SubjectGroup.DoesNotExist:
+            return Response({'error': 'SubjectGroup not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if user.role == UserRole.TEACHER and subject_group.teacher_id != user.id:
+            return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+        
+        # Superadmin and schooladmin also allowed; schooladmin must belong to the same school
+        if user.role == UserRole.SCHOOLADMIN and subject_group.classroom.school_id != user.school_id:
+            return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
+        if user.role not in [UserRole.TEACHER, UserRole.SCHOOLADMIN, UserRole.SUPERADMIN]:
+            return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
+        from django.db import transaction
+        
+        created_or_updated_grades = []
+        with transaction.atomic():
+            # Get or create formative category
+            formative_category, _ = GradeCategory.objects.get_or_create(
+                subject_group_id=subject_group_id,
+                is_formative=True,
+                defaults={'name': 'Формативное оценивание (ФО)', 'weight': 25}
+            )
+
+            # Calculate datetime from the provided date to save it
+            graded_at_dt = timezone.make_aware(datetime.combine(graded_at_date, datetime.min.time()))
+
+            for grade_item in grades_data:
+                # If value is null, and a record exists, we might want to delete it
+                student_id = grade_item['student_id']
+                value = grade_item.get('value')
+                max_value = grade_item.get('max_value', 10)
+                feedback = grade_item.get('feedback', '')
+
+                # Find existing record for this date and student
+                existing_grade = ManualGrade.objects.filter(
+                    subject_group_id=subject_group_id,
+                    student_id=student_id,
+                    grade_type=ManualGradeType.LESSON,
+                    graded_at__date=graded_at_date
+                ).first()
+
+                if value is None:
+                    # If existing record matches, but new value is empty, remove the grade.
+                    if existing_grade:
+                        existing_grade.delete()
+                    continue
+
+                if existing_grade:
+                    # Update
+                    existing_grade.value = value
+                    existing_grade.max_value = max_value
+                    existing_grade.feedback = feedback
+                    existing_grade.course_section_id = course_section_id
+                    existing_grade.graded_by = user
+                    existing_grade.category = formative_category
+                    existing_grade.save()
+                    created_or_updated_grades.append(existing_grade)
+                else:
+                    # Create
+                    new_grade = ManualGrade.objects.create(
+                        student_id=student_id,
+                        subject_group_id=subject_group_id,
+                        course_section_id=course_section_id,
+                        value=value,
+                        max_value=max_value,
+                        title='',  # Or 'ФО'
+                        grade_type=ManualGradeType.LESSON,
+                        category=formative_category,
+                        graded_by=user,
+                        graded_at=graded_at_dt,
+                        feedback=feedback
+                    )
+                    created_or_updated_grades.append(new_grade)
+
+        res_serializer = self.get_serializer(created_or_updated_grades, many=True)
+        return Response(res_serializer.data, status=status.HTTP_200_OK)
+
     @action(detail=False, methods=['get'], url_path='grade-book')
     def grade_book(self, request):
         """
@@ -1122,14 +1251,15 @@ class ManualGradeViewSet(viewsets.ModelViewSet):
         manual = ManualGrade.objects.filter(
             student_id__in=student_ids,
             subject_group_id=sg.id,
-        ).select_related('student', 'graded_by')
+        ).select_related('student', 'graded_by', 'category')
         for m in manual:
             results.append({
                 'source_type': 'manual',
                 'source_id': m.id,
                 'student_id': m.student_id,
                 'student_username': m.student.username,
-                'title': m.title or m.get_grade_type_display(),
+                'title': m.title or (m.category.name if m.category else m.get_grade_type_display()),
+                'category_name': m.category.name if m.category else None,
                 'value': m.value,
                 'max_value': m.max_value,
                 'graded_at': m.graded_at,
@@ -1191,42 +1321,41 @@ class ManualGradeViewSet(viewsets.ModelViewSet):
         summary = []
 
         for sg in subject_groups:
-            # Ручные оценки -> приводим к процентам
-            manual_qs = ManualGrade.objects.filter(
+            categories = GradeCategory.objects.filter(subject_group=sg)
+            manual_grades = ManualGrade.objects.filter(
                 student_id=target_student_id,
                 subject_group=sg,
-            )
-            manual_values = []
-            for mg in manual_qs:
+            ).select_related('category')
+            
+            category_grades = {}
+            for mg in manual_grades:
+                cat_id = mg.category_id
+                if cat_id not in category_grades:
+                    category_grades[cat_id] = []
+                    
                 if mg.value is not None and mg.max_value:
-                    manual_values.append((mg.value / mg.max_value) * 100.0)
+                    category_grades[cat_id].append({
+                        'percentage': (mg.value / mg.max_value) * 100.0,
+                        'weight': mg.weight_in_category
+                    })
 
-            # Оценки за задания -> тоже в процентах относительно max_grade
-            # Фильтруем по course_section__subject_group, так как у Assignment нет прямого FK на SubjectGroup
-            grades_qs = Grade.objects.filter(
-                submission__student_id=target_student_id,
-                submission__assignment__course_section__subject_group_id=sg.id,
-            ).select_related('submission__assignment')
-
-            assignment_values = []
-            for g in grades_qs:
-                if g.grade_value is not None:
-                    assignment = getattr(g.submission, "assignment", None)
-                    max_grade = getattr(assignment, "max_grade", None) if assignment else None
-                    if max_grade:
-                        assignment_values.append((g.grade_value / max_grade) * 100.0)
-
-            # Оценки за тесты (берём процент как есть)
-            attempts = Attempt.objects.filter(
-                student_id=target_student_id,
-                test__course_section__subject_group=sg,
-                is_completed=True,
-            )
-            attempt_values = [a.percentage for a in attempts if a.percentage is not None]
-
-            # Все значения теперь в процентах (0–100)
-            all_values = manual_values + assignment_values + attempt_values
-            avg = sum(all_values) / len(all_values) if all_values else None
+            total_active_weight = 0
+            total_score = 0
+            
+            for cat in categories:
+                grades = category_grades.get(cat.id, [])
+                if grades:
+                    total_weighted_sum = sum(g['percentage'] * (g['weight'] / 100.0) for g in grades)
+                    total_weight_sum = sum(g['weight'] / 100.0 for g in grades)
+                    if total_weight_sum > 0:
+                        cat_avg = total_weighted_sum / total_weight_sum
+                        total_score += cat_avg * (cat.weight / 100.0)
+                        total_active_weight += (cat.weight / 100.0)
+                        
+            if total_active_weight > 0:
+                avg = total_score / total_active_weight
+            else:
+                avg = None
 
             summary.append(
                 {
@@ -1234,21 +1363,19 @@ class ManualGradeViewSet(viewsets.ModelViewSet):
                     'course_name': sg.course.name,
                     'classroom_name': str(sg.classroom),
                     'average': avg,
-                    'manual_count': len(manual_values),
-                    'assignment_grades_count': len(assignment_values),
-                    'test_attempts_count': len(attempt_values),
+                    'manual_count': len(manual_grades),
                 }
             )
 
         return Response({'results': summary})
 
 
-class GradeWeightViewSet(viewsets.ModelViewSet):
-    queryset = GradeWeight.objects.select_related('subject_group').all()
-    serializer_class = GradeWeightSerializer
+class GradeCategoryViewSet(viewsets.ModelViewSet):
+    queryset = GradeCategory.objects.select_related('subject_group').all()
+    serializer_class = GradeCategorySerializer
     permission_classes = [RoleBasedPermission]
     filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['subject_group', 'source_type']
+    filterset_fields = ['subject_group', 'is_formative']
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -1264,37 +1391,20 @@ class GradeWeightViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(subject_group__classroom__school=user.school)
         return queryset.distinct()
 
-    @action(detail=False, methods=['post'], url_path='set-weights')
-    def set_weights(self, request):
-        """
-        Сохранить все три веса одним запросом (сумма должна быть 100%).
-        Тело: { "subject_group": id, "assignment": 0, "test": 30, "manual": 70 }.
-        """
-        serializer = GradeWeightBulkSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        data = serializer.validated_data
-        from courses.models import SubjectGroup
-        try:
-            subject_group = SubjectGroup.objects.select_related('classroom').get(pk=data['subject_group'])
-        except SubjectGroup.DoesNotExist:
-            return Response({'subject_group': ['Subject group not found.']}, status=status.HTTP_404_NOT_FOUND)
-        user = request.user
-        if user.role == UserRole.TEACHER and subject_group.teacher_id != user.id:
-            return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
-        if user.role == UserRole.SCHOOLADMIN and subject_group.classroom.school_id != user.school_id:
-            return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
-        from django.db import transaction
-        with transaction.atomic():
-            for source_type, weight in [('assignment', data['assignment']), ('test', data['test']), ('manual', data['manual'])]:
-                GradeWeight.objects.update_or_create(
-                    subject_group=subject_group,
-                    source_type=source_type,
-                    defaults={'weight': weight},
-                )
-        items = GradeWeight.objects.filter(subject_group=subject_group).order_by('source_type')
-        response_serializer = GradeWeightSerializer(items, many=True)
-        return Response(response_serializer.data, status=status.HTTP_200_OK)
+    def list(self, request, *args, **kwargs):
+        subject_group_id = request.query_params.get('subject_group')
+        if subject_group_id:
+            try:
+                from courses.models import SubjectGroup
+                if SubjectGroup.objects.filter(pk=subject_group_id).exists():
+                    GradeCategory.objects.get_or_create(
+                        subject_group_id=subject_group_id,
+                        is_formative=True,
+                        defaults={'name': 'Формативное оценивание (ФО)', 'weight': 25}
+                    )
+            except (ValueError, TypeError):
+                pass
+        return super().list(request, *args, **kwargs)
 
 
 class AttendanceViewSet(viewsets.ModelViewSet):
