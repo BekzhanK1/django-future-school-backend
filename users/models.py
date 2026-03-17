@@ -16,10 +16,8 @@ class UserManager(BaseUserManager):
     def create_user(self, username, email=None, password=None, role=UserRole.STUDENT, **extra_fields):
         if not username:
             raise ValueError('The Username field must be set')
-        if not email:
-            raise ValueError('The Email field must be set')
 
-        email = self.normalize_email(email)
+        email = self.normalize_email(email) if email else None
         # Ensure is_active is True by default if not explicitly set
         if 'is_active' not in extra_fields:
             extra_fields['is_active'] = True
@@ -46,7 +44,7 @@ class UserManager(BaseUserManager):
 
 
 class User(AbstractUser):
-    email = models.EmailField(unique=True)
+    email = models.EmailField(null=True, blank=True)
     first_name = models.CharField(max_length=150, blank=True)
     last_name = models.CharField(max_length=150, blank=True)
     phone_number = models.CharField(max_length=20, blank=True, null=True)
@@ -76,6 +74,11 @@ class User(AbstractUser):
     last_active = models.DateTimeField(null=True, blank=True, help_text="Last time user was active")
     # Avatar key from predefined list (e.g. "1"-"8"); empty means show first letter of name
     avatar = models.CharField(max_length=32, blank=True, null=True)
+    # Require user to change password on next successful login (e.g. after import)
+    must_change_password = models.BooleanField(default=False)
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     objects = UserManager()
 

@@ -28,25 +28,24 @@ from future_school.settings import FRONTEND_URL
 class LoginView(TokenObtainPairView):
     def post(self, request, *args, **kwargs):
         response = super().post(request, *args, **kwargs)
-        
+
         if response.status_code == 200:
-            # Get the user from the validated credentials
             serializer = self.get_serializer(data=request.data)
             serializer.is_valid(raise_exception=True)
             user = serializer.user
-            
-            # Serialize user data
+
             user_serializer = UserSerializer(user)
             user_data = user_serializer.data
-            
-            # Add user data to the response
+
+            # Expose must_change_password flag so frontend can force password update flow
+            user_data['must_change_password'] = getattr(user, "must_change_password", False)
+
             response.data['user'] = user_data
-            
-            # Add role-specific data
+
             if user.role == 'student':
                 student_data = self.get_student_data(user)
                 response.data['user']['student_data'] = student_data
-            
+
         return response
     
     def get_student_data(self, user):
@@ -250,12 +249,11 @@ class ChangePasswordView(APIView):
 
 
 class RequestPasswordResetSerializer(serializers.Serializer):
-    username = serializers.CharField()
+    email = serializers.EmailField()
 
 
 class ConfirmPasswordResetSerializer(serializers.Serializer):
     token = serializers.CharField()
-    new_password = serializers.CharField()
 
 
 @extend_schema(
@@ -270,26 +268,23 @@ class ConfirmPasswordResetSerializer(serializers.Serializer):
 def request_password_reset(request):
     serializer = RequestPasswordResetSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    try:
-        user = User.objects.get(username=serializer.validated_data["username"])
-    except User.DoesNotExist:
+    user = User.objects.filter(email=serializer.validated_data["email"]).first()
+    if not user:
         return Response(status=status.HTTP_204_NO_CONTENT)
     token = PasswordResetToken.objects.create(
         user=user,
         expires_at=timezone.now() + timezone.timedelta(hours=1),
     )
-    # Send reset email asynchronously
+    # Send reset email asynchronously with one-click link
     reset_link = f"{FRONTEND_URL}/reset-password?token={token.token}"
     subject = "Password Reset Instructions"
     text_body = (
         "We received a request to reset your password.\n\n"
-        f"Use this token: {token.token}\n"
-        f"Or click the link: {reset_link}\n\n"
+        f"Click the link below to generate a new password:\n{reset_link}\n\n"
         "If you did not request this, you can ignore this email."
     )
     html_body = (
         f"<p>We received a request to reset your password.</p>"
-        f"<p><strong>Token:</strong> {token.token}</p>"
         f"<p><a href=\"{reset_link}\">Reset your password</a></p>"
         f"<p>If you did not request this, you can ignore this email.</p>"
     )
@@ -316,11 +311,28 @@ def confirm_password_reset(request):
     if prt.expires_at < timezone.now():
         return Response({"detail": "Token expired"}, status=status.HTTP_400_BAD_REQUEST)
     user = prt.user
-    validate_password(serializer.validated_data["new_password"], user)
-    user.set_password(serializer.validated_data["new_password"])
-    user.save()
+
+    # Generate new numeric password and enforce change on next login
+    import random
+
+    new_password = "".join(str(random.randint(0, 9)) for _ in range(8))
+    user.set_password(new_password)
+    if hasattr(user, "must_change_password"):
+        user.must_change_password = True
+        user.save(update_fields=["password", "must_change_password"])
+    else:
+        user.save(update_fields=["password"])
+
     prt.used = True
     prt.save(update_fields=["used"])
+
+    # Send new password to user's email if available
+    if user.email:
+        subject = "Your new password"
+        text_body = f"Your new password is: {new_password}"
+        html_body = f"<p>Your new password is: <strong>{new_password}</strong></p>"
+        send_email_task.delay(subject, text_body, [user.email], html_body)
+
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 
