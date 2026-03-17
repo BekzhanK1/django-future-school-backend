@@ -970,18 +970,7 @@ class SchoolViewSet(viewsets.ModelViewSet):
                                     classroom=classroom, user=user
                                 )
 
-                                results["new_students_credentials"].append(
-                                    {
-                                        "first_name": first_name,
-                                        "last_name": last_name,
-                                        "class_name": class_name,
-                                        "username": username,
-                                        "email": email,
-                                        "password": default_password,
-                                        "parent_username": row_parent or None,
-                                    }
-                                )
-
+                                parent_actual_username = None
                                 if row_parent:
                                     par_user, par_signal = get_or_create_parent(
                                         row_parent,
@@ -997,6 +986,19 @@ class SchoolViewSet(viewsets.ModelViewSet):
                                         )
                                     elif par_user:
                                         par_user.children.add(user)
+                                        parent_actual_username = par_user.username
+
+                                results["new_students_credentials"].append(
+                                    {
+                                        "first_name": first_name,
+                                        "last_name": last_name,
+                                        "class_name": class_name,
+                                        "username": username,
+                                        "email": email,
+                                        "password": default_password,
+                                        "parent_username": parent_actual_username,
+                                    }
+                                )
 
                                 results["created_students"][class_name] = (
                                     results["created_students"].get(class_name, 0) + 1
