@@ -229,9 +229,16 @@ MINIO_MEDIA_BUCKET_NAME = os.getenv("MINIO_MEDIA_BUCKET_NAME", "media")
 AWS_ACCESS_KEY_ID = MINIO_ROOT_USER
 AWS_SECRET_ACCESS_KEY = MINIO_ROOT_PASSWORD
 AWS_STORAGE_BUCKET_NAME = MINIO_MEDIA_BUCKET_NAME
-AWS_S3_ENDPOINT_URL = MINIO_ENDPOINT
+# IMPORTANT:
+# Use external/public endpoint for presigned URLs when available,
+# because the Host header is part of the AWS SigV4 signature.
+# If we sign with an internal host like "minio:9000", links will break in browsers.
+_S3_EFFECTIVE_ENDPOINT = MINIO_EXTERNAL_ENDPOINT or MINIO_ENDPOINT
+AWS_S3_ENDPOINT_URL = _S3_EFFECTIVE_ENDPOINT
 AWS_S3_REGION_NAME = "us-east-1"
-AWS_S3_USE_SSL = MINIO_ENDPOINT.startswith('https')
+AWS_S3_USE_SSL = _S3_EFFECTIVE_ENDPOINT.startswith('https')
+# MinIO usually needs path-style addressing for best compatibility.
+AWS_S3_ADDRESSING_STYLE = "path"
 AWS_S3_FILE_OVERWRITE = False
 AWS_DEFAULT_ACL = None
 AWS_QUERYSTRING_AUTH = True  # For security, signed URLs
