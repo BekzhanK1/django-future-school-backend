@@ -66,6 +66,7 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt",
     "drf_spectacular",
     "django_filters",
+    "storages",
     "users",
     "schools",
     "courses",
@@ -210,7 +211,7 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STORAGES = {
-    "default": {"BACKEND": "storages.backends.s3.S3Boto3Storage"},
+    "default": {"BACKEND": "storages.backends.s3boto3.S3Boto3Storage"},
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
 }
 
