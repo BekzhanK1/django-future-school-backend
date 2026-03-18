@@ -43,7 +43,7 @@ services:
     ports:
       - "9000:9000"
     environment:
-      DEBUG: "0"
+      DEBUG: "1"
       DB_NAME: ${DB_NAME:-future_school_db}
       DB_USER: ${DB_USER:-future}
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
