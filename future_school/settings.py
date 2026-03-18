@@ -210,13 +210,31 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STORAGES = {
-    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "default": {"BACKEND": "storages.backends.s3.S3Boto3Storage"},
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
 }
 
 # Media files (User uploads)
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+
+# MinIO/S3 storage configuration
+MINIO_ROOT_USER = os.getenv("MINIO_ROOT_USER", "minioadmin")
+MINIO_ROOT_PASSWORD = os.getenv("MINIO_ROOT_PASSWORD", "minioadmin123")
+MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "http://minio:9000")
+MINIO_EXTERNAL_ENDPOINT = os.getenv("MINIO_EXTERNAL_ENDPOINT", "http://localhost:9001")
+MINIO_MEDIA_BUCKET_NAME = os.getenv("MINIO_MEDIA_BUCKET_NAME", "media")
+
+AWS_ACCESS_KEY_ID = MINIO_ROOT_USER
+AWS_SECRET_ACCESS_KEY = MINIO_ROOT_PASSWORD
+AWS_STORAGE_BUCKET_NAME = MINIO_MEDIA_BUCKET_NAME
+AWS_S3_ENDPOINT_URL = MINIO_ENDPOINT
+AWS_S3_REGION_NAME = "us-east-1"
+AWS_S3_USE_SSL = MINIO_ENDPOINT.startswith('https')
+AWS_S3_FILE_OVERWRITE = False
+AWS_DEFAULT_ACL = None
+AWS_QUERYSTRING_AUTH = True  # For security, signed URLs
+AWS_S3_SIGNATURE_VERSION = "s3v4"
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

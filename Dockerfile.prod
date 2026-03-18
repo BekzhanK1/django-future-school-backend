@@ -13,6 +13,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+RUN chmod +x scripts/init_minio.py
+
 RUN mkdir -p /app/data /app/media
 
 ENV PYTHONUNBUFFERED=1
@@ -20,4 +22,4 @@ ENV PYTHONUNBUFFERED=1
 EXPOSE 9000
 
 # Default: migrate, collectstatic, then gunicorn (override in compose if needed)
-CMD ["sh", "-c", "python manage.py migrate --noinput && python manage.py collectstatic --noinput && gunicorn future_school.wsgi:application --bind 0.0.0.0:9000 --workers 2 --threads 2 --timeout 300"]
+CMD ["sh", "-c", "python manage.py migrate --noinput && python scripts/init_minio.py && python manage.py collectstatic --noinput && gunicorn future_school.wsgi:application --bind 0.0.0.0:9000 --workers 2 --threads 2 --timeout 300"]

@@ -15,6 +15,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy project files
 COPY . .
 
+# Make init script executable
+RUN chmod +x scripts/init_minio.py
+
 # Create directory for SQLite database
 RUN mkdir -p /app/data
 

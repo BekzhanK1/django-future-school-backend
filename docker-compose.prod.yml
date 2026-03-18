@@ -18,6 +18,23 @@ services:
       timeout: 5s
       retries: 5
 
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    ports:
+      - "9001:9000"  # API
+      - "9002:9001"  # Console
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
   backend:
     build:
       context: .
@@ -36,12 +53,17 @@ services:
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       CELERY_TASK_ALWAYS_EAGER: "true"
       ALLOWED_HOSTS: "*"
-    volumes:
-      - backend_media:/app/media
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_EXTERNAL_ENDPOINT: http://localhost:9001
+      MINIO_MEDIA_BUCKET_NAME: media
     depends_on:
       db:
+        condition: service_healthy
+      minio:
         condition: service_healthy
 
 volumes:
   postgres_data:
-  backend_media:
+  minio-data:
