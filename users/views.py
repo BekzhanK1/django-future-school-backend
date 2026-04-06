@@ -243,8 +243,13 @@ class ChangePasswordView(APIView):
     def post(self, request):
         serializer = ChangePasswordSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
-        request.user.set_password(serializer.validated_data["new_password"])
-        request.user.save()
+        user = request.user
+        user.set_password(serializer.validated_data["new_password"])
+        if hasattr(user, "must_change_password"):
+            user.must_change_password = False
+            user.save(update_fields=["password", "must_change_password"])
+        else:
+            user.save(update_fields=["password"])
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

@@ -9,8 +9,12 @@ class UserSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'iin', 'first_name', 'last_name', 'phone_number', 'role', 'is_active', 'kundelik_id', 'school', 'school_name', 'children', 'parents', 'avatar']
-        read_only_fields = ['id', 'username']
+        fields = [
+            'id', 'username', 'email', 'iin', 'first_name', 'last_name', 'phone_number',
+            'role', 'is_active', 'kundelik_id', 'school', 'school_name', 'children', 'parents',
+            'avatar', 'must_change_password',
+        ]
+        read_only_fields = ['id', 'username', 'must_change_password']
 
     def get_children(self, obj):
         """Get children (students) for parent users"""
