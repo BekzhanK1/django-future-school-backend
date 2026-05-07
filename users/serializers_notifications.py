@@ -1,8 +1,9 @@
 from rest_framework import serializers
+from common.drf import ModelSerializer
 from .models_notifications import Notification
 
 
-class NotificationSerializer(serializers.ModelSerializer):
+class NotificationSerializer(ModelSerializer):
     """Serializer for notifications"""
     triggered_by_username = serializers.CharField(
         source="triggered_by.username", read_only=True)

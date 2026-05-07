@@ -1,11 +1,12 @@
 from rest_framework import serializers
+from common.drf import ModelSerializer
 from django.utils import timezone
 from .models import Test, Question, Option, Attempt, Answer, QuestionType
 from courses.models import CourseSection, SubjectGroup, Course
 from users.models import UserRole
 
 
-class OptionSerializer(serializers.ModelSerializer):
+class OptionSerializer(ModelSerializer):
     id = serializers.IntegerField(
         required=False, allow_null=True)  # Allow id for updates
 
@@ -15,7 +16,7 @@ class OptionSerializer(serializers.ModelSerializer):
         # id is not read_only when updating (for nested updates)
 
 
-class QuestionSerializer(serializers.ModelSerializer):
+class QuestionSerializer(ModelSerializer):
     options = OptionSerializer(many=True, read_only=True)
     options_count = serializers.SerializerMethodField()
 
@@ -32,7 +33,7 @@ class QuestionSerializer(serializers.ModelSerializer):
         return obj.options.count()
 
 
-class TestSerializer(serializers.ModelSerializer):
+class TestSerializer(ModelSerializer):
     questions = QuestionSerializer(many=True, read_only=True)
     course_section_title = serializers.CharField(
         source='course_section.title', read_only=True)
@@ -205,7 +206,7 @@ class TestSerializer(serializers.ModelSerializer):
         return bool(latest_attempt.can_view_results)
 
 
-class AttemptSerializer(serializers.ModelSerializer):
+class AttemptSerializer(ModelSerializer):
     student_username = serializers.CharField(
         source='student.username', read_only=True)
     student_email = serializers.CharField(
@@ -293,7 +294,7 @@ class AttemptSerializer(serializers.ModelSerializer):
         return data
 
 
-class AnswerSerializer(serializers.ModelSerializer):
+class AnswerSerializer(ModelSerializer):
     question = QuestionSerializer(read_only=True)
     selected_options = OptionSerializer(many=True, read_only=True)
     max_score = serializers.ReadOnlyField()
@@ -428,7 +429,7 @@ class ViewResultsSerializer(serializers.Serializer):
     pass
 
 
-class CreateQuestionSerializer(serializers.ModelSerializer):
+class CreateQuestionSerializer(ModelSerializer):
     options = OptionSerializer(many=True, required=False)
 
     class Meta:
@@ -448,7 +449,7 @@ class CreateQuestionSerializer(serializers.ModelSerializer):
         return question
 
 
-class NestedQuestionCreateSerializer(serializers.ModelSerializer):
+class NestedQuestionCreateSerializer(ModelSerializer):
     """Serializer for creating/updating questions nested under Test create/update.
     Does not require or accept the `test` field; it will be set by the parent.
     Supports updating existing questions by including `id` field.
@@ -465,7 +466,7 @@ class NestedQuestionCreateSerializer(serializers.ModelSerializer):
         ]
 
 
-class CreateTestSerializer(serializers.ModelSerializer):
+class CreateTestSerializer(ModelSerializer):
     # Use nested question serializer that doesn't require `test` field
     questions = NestedQuestionCreateSerializer(many=True, required=False)
     course = serializers.PrimaryKeyRelatedField(

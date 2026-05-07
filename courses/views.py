@@ -12,6 +12,7 @@ from .serializers import (
     ScheduleSlotSerializer, AcademicYearSerializer, HolidaySerializer,
     AutoCreateWeekSectionsSerializer, CourseFullSerializer
 )
+from common.tz import school_timezone
 from schools.permissions import IsSuperAdmin, IsSchoolAdminOrSuperAdmin, IsTeacherOrAbove
 from learning.role_permissions import RoleBasedPermission
 from users.models import UserRole
@@ -241,7 +242,7 @@ class CourseViewSet(viewsets.ModelViewSet):
                         due_at = datetime.combine(
                             due_date,
                             tmpl_asg.template_due_time,
-                            tzinfo=timezone.get_current_timezone(),
+                            tzinfo=school_timezone(),
                         )
 
                     if derived_asg:
@@ -1194,7 +1195,7 @@ class SubjectGroupViewSet(viewsets.ModelViewSet):
                     due_at = datetime.combine(
                         due_date,
                         tmpl_asg.template_due_time,
-                        tzinfo=timezone.get_current_timezone(),
+                        tzinfo=school_timezone(),
                     )
 
                 if derived_asg:

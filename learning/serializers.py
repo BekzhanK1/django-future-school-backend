@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from common.drf import LocalDateTimeField, ModelSerializer
 from .models import (
     Resource, Assignment, AssignmentAttachment, Submission, SubmissionAttachment,
     Grade, ManualGrade, ManualGradeType, GradeCategory, Attendance, AttendanceRecord, Event,
@@ -32,7 +33,7 @@ class FormDataBooleanField(serializers.BooleanField):
         return super().to_internal_value(data)
 
 
-class ResourceSerializer(serializers.ModelSerializer):
+class ResourceSerializer(ModelSerializer):
     children = serializers.SerializerMethodField()
     parent_title = serializers.CharField(source='parent_resource.title', read_only=True)
     is_visible_to_students = FormDataBooleanField(required=False, default=True)
@@ -49,7 +50,7 @@ class ResourceSerializer(serializers.ModelSerializer):
         return ResourceSerializer(children, many=True, context=self.context).data
 
 
-class ResourceTreeSerializer(serializers.ModelSerializer):
+class ResourceTreeSerializer(ModelSerializer):
     """Serializer for displaying resource tree structure"""
     children = serializers.SerializerMethodField()
     level = serializers.SerializerMethodField()
@@ -87,7 +88,7 @@ class ResourceTreeSerializer(serializers.ModelSerializer):
         return level
 
 
-class AssignmentAttachmentSerializer(serializers.ModelSerializer):
+class AssignmentAttachmentSerializer(ModelSerializer):
     class Meta:
         model = AssignmentAttachment
         fields = ['id', 'type', 'title', 'content', 'file_url', 'file', 'position', 'assignment']
@@ -97,7 +98,7 @@ class AssignmentAttachmentSerializer(serializers.ModelSerializer):
         }
 
 
-class AssignmentSerializer(serializers.ModelSerializer):
+class AssignmentSerializer(ModelSerializer):
     course_section_title = serializers.CharField(source='course_section.title', read_only=True)
     subject_group_course_name = serializers.CharField(source='course_section.subject_group.course.name', read_only=True)
     subject_group_course_code = serializers.CharField(source='course_section.subject_group.course.course_code', read_only=True)
@@ -201,13 +202,13 @@ class AssignmentSerializer(serializers.ModelSerializer):
         return assignment
 
 
-class SubmissionAttachmentSerializer(serializers.ModelSerializer):
+class SubmissionAttachmentSerializer(ModelSerializer):
     class Meta:
         model = SubmissionAttachment
         fields = ['id', 'type', 'title', 'content', 'file_url', 'file', 'position', 'submission']
 
 
-class SubmissionSerializer(serializers.ModelSerializer):
+class SubmissionSerializer(ModelSerializer):
     student_username = serializers.CharField(source='student.username', read_only=True)
     student_email = serializers.CharField(source='student.email', read_only=True)
     student_first_name = serializers.CharField(source='student.first_name', read_only=True)
@@ -252,7 +253,7 @@ class SubmissionSerializer(serializers.ModelSerializer):
             return None
 
 
-class GradeSerializer(serializers.ModelSerializer):
+class GradeSerializer(ModelSerializer):
     student_username = serializers.CharField(source='submission.student.username', read_only=True)
     student_first_name = serializers.CharField(source='submission.student.first_name', read_only=True)
     student_last_name = serializers.CharField(source='submission.student.last_name', read_only=True)
@@ -281,7 +282,7 @@ class BulkGradeSerializer(serializers.Serializer):
         return value
 
 
-class ManualGradeSerializer(serializers.ModelSerializer):
+class ManualGradeSerializer(ModelSerializer):
     student_username = serializers.CharField(source='student.username', read_only=True)
     student_first_name = serializers.CharField(source='student.first_name', read_only=True)
     student_last_name = serializers.CharField(source='student.last_name', read_only=True)
@@ -316,7 +317,7 @@ class BulkManualGradeCreateUpdateSerializer(serializers.Serializer):
     grades = BulkManualGradeItemSerializer(many=True)
 
 
-class GradeCategorySerializer(serializers.ModelSerializer):
+class GradeCategorySerializer(ModelSerializer):
     class Meta:
         model = GradeCategory
         fields = ['id', 'subject_group', 'name', 'weight', 'is_formative']
@@ -351,7 +352,7 @@ class GradeCategorySerializer(serializers.ModelSerializer):
         return attrs
 
 
-class AttendanceRecordSerializer(serializers.ModelSerializer):
+class AttendanceRecordSerializer(ModelSerializer):
     student_username = serializers.CharField(source='student.username', read_only=True)
     student_first_name = serializers.CharField(source='student.first_name', read_only=True)
     student_last_name = serializers.CharField(source='student.last_name', read_only=True)
@@ -363,7 +364,7 @@ class AttendanceRecordSerializer(serializers.ModelSerializer):
         read_only_fields = ['id']
 
 
-class AttendanceSerializer(serializers.ModelSerializer):
+class AttendanceSerializer(ModelSerializer):
     subject_group_course_name = serializers.CharField(source='subject_group.course.name', read_only=True)
     subject_group_course_code = serializers.CharField(source='subject_group.course.course_code', read_only=True)
     classroom_name = serializers.CharField(source='subject_group.classroom', read_only=True)
@@ -391,7 +392,7 @@ class AttendanceSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'taken_at']
 
 
-class AttendanceCreateSerializer(serializers.ModelSerializer):
+class AttendanceCreateSerializer(ModelSerializer):
     """Serializer for creating attendance with bulk student records"""
     records = AttendanceRecordSerializer(many=True)
     
@@ -423,7 +424,7 @@ class AttendanceCreateSerializer(serializers.ModelSerializer):
         return value
 
 
-class AttendanceUpdateSerializer(serializers.ModelSerializer):
+class AttendanceUpdateSerializer(ModelSerializer):
     """Serializer for updating attendance records"""
     records = AttendanceRecordSerializer(many=True)
     
@@ -450,12 +451,12 @@ class AttendanceUpdateSerializer(serializers.ModelSerializer):
         return instance
 
 
-class StudentAttendanceHistorySerializer(serializers.ModelSerializer):
+class StudentAttendanceHistorySerializer(ModelSerializer):
     """Serializer for student's attendance history"""
     subject_group_course_name = serializers.CharField(source='attendance.subject_group.course.name', read_only=True)
     subject_group_course_code = serializers.CharField(source='attendance.subject_group.course.course_code', read_only=True)
     classroom_name = serializers.CharField(source='attendance.subject_group.classroom', read_only=True)
-    taken_at = serializers.DateTimeField(source='attendance.taken_at', read_only=True)
+    taken_at = LocalDateTimeField(source='attendance.taken_at', read_only=True)
     taken_by_username = serializers.CharField(source='attendance.taken_by.username', read_only=True)
     
     class Meta:
@@ -476,7 +477,7 @@ class AttendanceMetricsSerializer(serializers.Serializer):
     course_name = serializers.CharField()
 
 
-class EventSerializer(serializers.ModelSerializer):
+class EventSerializer(ModelSerializer):
     subject_group_display = serializers.SerializerMethodField()
     target_users = serializers.PrimaryKeyRelatedField(many=True, queryset=User.objects.all(), required=False)
     target_users_details = serializers.SerializerMethodField()

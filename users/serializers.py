@@ -1,8 +1,9 @@
 from rest_framework import serializers
+from common.drf import ModelSerializer
 from .models import User, AuthSession, PasswordResetToken, UserRole
 
 
-class UserSerializer(serializers.ModelSerializer):
+class UserSerializer(ModelSerializer):
     school_name = serializers.CharField(source='school.name', read_only=True)
     children = serializers.SerializerMethodField()
     parents = serializers.SerializerMethodField()
@@ -43,7 +44,7 @@ class UserSerializer(serializers.ModelSerializer):
         return []
 
 
-class ProfileUpdateSerializer(serializers.ModelSerializer):
+class ProfileUpdateSerializer(ModelSerializer):
     """For authenticated user updating own profile: phone_number, iin, and avatar only."""
     class Meta:
         model = User
@@ -61,7 +62,7 @@ class ProfileUpdateSerializer(serializers.ModelSerializer):
         return value
 
 
-class UserCreateSerializer(serializers.ModelSerializer):
+class UserCreateSerializer(ModelSerializer):
     password = serializers.CharField(write_only=True)
     password_confirm = serializers.CharField(write_only=True)
     
@@ -94,14 +95,14 @@ class UserCreateSerializer(serializers.ModelSerializer):
         return user
 
 
-class AuthSessionSerializer(serializers.ModelSerializer):
+class AuthSessionSerializer(ModelSerializer):
     class Meta:
         model = AuthSession
         fields = ['id', 'user_agent', 'ip_address', 'is_active', 'created_at', 'expires_at']
         read_only_fields = ['id', 'created_at', 'expires_at']
 
 
-class PasswordResetTokenSerializer(serializers.ModelSerializer):
+class PasswordResetTokenSerializer(ModelSerializer):
     class Meta:
         model = PasswordResetToken
         fields = ['id', 'created_at', 'expires_at', 'used']

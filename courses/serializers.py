@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from common.drf import ModelSerializer
 from datetime import datetime, timedelta
 from django.utils import timezone
 from django.db import transaction
@@ -14,14 +15,14 @@ class TimeFieldHHMM(serializers.TimeField):
     input_formats = ['%H:%M', '%H:%M:%S', '%H:%M:%S.%f']
 
 
-class CourseSerializer(serializers.ModelSerializer):
+class CourseSerializer(ModelSerializer):
     class Meta:
         model = Course
         fields = ['id', 'course_code', 'name',
                   'description', 'grade', 'language']
 
 
-class HolidaySerializer(serializers.ModelSerializer):
+class HolidaySerializer(ModelSerializer):
     """Serializer for holidays"""
     class Meta:
         model = Holiday
@@ -35,7 +36,7 @@ class HolidaySerializer(serializers.ModelSerializer):
         ]
 
 
-class QuarterSerializer(serializers.ModelSerializer):
+class QuarterSerializer(ModelSerializer):
     """Serializer for quarter"""
     class Meta:
         model = Quarter
@@ -48,7 +49,7 @@ class QuarterSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'quarter_index']
 
 
-class AcademicYearSerializer(serializers.ModelSerializer):
+class AcademicYearSerializer(ModelSerializer):
     """Serializer for academic year"""
     additional_holidays = HolidaySerializer(many=True, read_only=True)
     quarters = QuarterSerializer(many=True, required=False)
@@ -149,7 +150,7 @@ class AcademicYearSerializer(serializers.ModelSerializer):
         return instance
 
 
-class ScheduleSlotSerializer(serializers.ModelSerializer):
+class ScheduleSlotSerializer(ModelSerializer):
     """Serializer for schedule slots"""
     start_time = TimeFieldHHMM()
     end_time = TimeFieldHHMM()
@@ -260,7 +261,7 @@ class ScheduleSlotSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class SubjectGroupSerializer(serializers.ModelSerializer):
+class SubjectGroupSerializer(ModelSerializer):
     course_name = serializers.CharField(source='course.name', read_only=True)
     course_code = serializers.CharField(
         source='course.course_code', read_only=True)
@@ -288,7 +289,7 @@ class SubjectGroupSerializer(serializers.ModelSerializer):
                   'classroom_display', 'teacher_username', 'teacher_fullname', 'teacher_email', 'external_id', 'online_meeting', 'schedule_slots', 'color']
 
 
-class CourseSectionSerializer(serializers.ModelSerializer):
+class CourseSectionSerializer(ModelSerializer):
     resources = serializers.SerializerMethodField()
     assignments = serializers.SerializerMethodField()
     tests = serializers.SerializerMethodField()
@@ -397,7 +398,7 @@ class CourseSectionSerializer(serializers.ModelSerializer):
         return TestSerializer(tests, many=True, context=self.context).data
 
 
-class CourseFullSerializer(serializers.ModelSerializer):
+class CourseFullSerializer(ModelSerializer):
     subject_groups = SubjectGroupSerializer(many=True, read_only=True)
     subject_groups_count = serializers.SerializerMethodField()
     template_sections_count = serializers.SerializerMethodField()

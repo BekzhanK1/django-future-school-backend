@@ -6,10 +6,11 @@ Serializers for Microsoft Graph API integration endpoints.
 
 from django.utils import timezone
 from rest_framework import serializers
+from common.drf import LocalDateTimeField, ModelSerializer
 from .models import SchoolMicrosoftAccount, OnlineMeeting, MicrosoftGraphConfig
 
 
-class MicrosoftGraphConfigSerializer(serializers.ModelSerializer):
+class MicrosoftGraphConfigSerializer(ModelSerializer):
     """Serializer for Microsoft Graph configuration"""
     tenant_display = serializers.CharField(source='__str__', read_only=True)
     
@@ -19,7 +20,7 @@ class MicrosoftGraphConfigSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at', 'updated_at']
 
 
-class SchoolMicrosoftAccountSerializer(serializers.ModelSerializer):
+class SchoolMicrosoftAccountSerializer(ModelSerializer):
     """Serializer for school Microsoft accounts"""
     school = serializers.StringRelatedField(read_only=True)
     created_by = serializers.StringRelatedField(read_only=True)
@@ -34,7 +35,7 @@ class SchoolMicrosoftAccountSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'school', 'created_by', 'created_at', 'updated_at']
 
 
-class OnlineMeetingSerializer(serializers.ModelSerializer):
+class OnlineMeetingSerializer(ModelSerializer):
     """Serializer for online meetings"""
     created_by = serializers.StringRelatedField(read_only=True)
     subject_group = serializers.StringRelatedField(read_only=True)
@@ -50,7 +51,7 @@ class OnlineMeetingSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'school_account', 'created_by', 'microsoft_meeting_id', 'created_at', 'updated_at']
 
-class ShortOnlineMeetingSerializer(serializers.ModelSerializer):
+class ShortOnlineMeetingSerializer(ModelSerializer):
     """Short serializer for online meetings: id, subject_group, join_url"""
     subject_group = serializers.StringRelatedField(read_only=True)
     url = serializers.URLField(source='join_url', read_only=True)
@@ -128,10 +129,10 @@ class CreateOnlineMeetingSerializer(serializers.Serializer):
         allow_blank=True,
         help_text="Description of the meeting"
     )
-    start_time = serializers.DateTimeField(
+    start_time = LocalDateTimeField(
         help_text="Start time of the meeting"
     )
-    end_time = serializers.DateTimeField(
+    end_time = LocalDateTimeField(
         help_text="End time of the meeting"
     )
     

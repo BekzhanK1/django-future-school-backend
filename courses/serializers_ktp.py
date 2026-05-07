@@ -1,14 +1,15 @@
 import rest_framework.serializers as serializers
+from common.drf import ModelSerializer
 from .models_ktp import AcademicPlan, PlanSubjectGroup, PlanQuarterDetail, Section, LearningObjective, Lesson
 from courses.serializers import CourseSerializer, SubjectGroupSerializer, QuarterSerializer
 
-class LearningObjectiveSerializer(serializers.ModelSerializer):
+class LearningObjectiveSerializer(ModelSerializer):
     class Meta:
         model = LearningObjective
         fields = '__all__'
 
 
-class LessonSerializer(serializers.ModelSerializer):
+class LessonSerializer(ModelSerializer):
     objectives = LearningObjectiveSerializer(many=True, read_only=True)
     objective_ids = serializers.PrimaryKeyRelatedField(
         queryset=LearningObjective.objects.all(), 
@@ -23,7 +24,7 @@ class LessonSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
-class SectionSerializer(serializers.ModelSerializer):
+class SectionSerializer(ModelSerializer):
     lessons = LessonSerializer(many=True, read_only=True)
 
     class Meta:
@@ -31,7 +32,7 @@ class SectionSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
-class PlanQuarterDetailSerializer(serializers.ModelSerializer):
+class PlanQuarterDetailSerializer(ModelSerializer):
     sections = SectionSerializer(many=True, read_only=True)
     quarter = QuarterSerializer(read_only=True)
     quarter_id = serializers.IntegerField(write_only=True)
@@ -41,7 +42,7 @@ class PlanQuarterDetailSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
-class PlanSubjectGroupSerializer(serializers.ModelSerializer):
+class PlanSubjectGroupSerializer(ModelSerializer):
     subject_group = SubjectGroupSerializer(read_only=True)
     subject_group_id = serializers.IntegerField(write_only=True)
 
@@ -50,7 +51,7 @@ class PlanSubjectGroupSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
-class AcademicPlanSerializer(serializers.ModelSerializer):
+class AcademicPlanSerializer(ModelSerializer):
     plan_subject_groups = PlanSubjectGroupSerializer(many=True, read_only=True)
     quarter_details = PlanQuarterDetailSerializer(many=True, read_only=True)
     course = CourseSerializer(read_only=True)

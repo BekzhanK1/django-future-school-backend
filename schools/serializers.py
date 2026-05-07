@@ -1,16 +1,17 @@
 from rest_framework import serializers
+from common.drf import ModelSerializer
 from django.db.models import Count, Q
 from .models import School, Classroom, ClassroomUser
 from users.models import User, UserRole
 
 
-class SchoolSerializer(serializers.ModelSerializer):
+class SchoolSerializer(ModelSerializer):
     class Meta:
         model = School
         fields = ['id', 'name', 'city', 'country', 'logo_url', 'contact_email', 'contact_phone', 'kundelik_id']
 
 
-class ClassroomSerializer(serializers.ModelSerializer):
+class ClassroomSerializer(ModelSerializer):
     school_name = serializers.CharField(source='school.name', read_only=True)
     total_students = serializers.SerializerMethodField()
     
@@ -23,7 +24,7 @@ class ClassroomSerializer(serializers.ModelSerializer):
         return obj.classroom_users.filter(user__role=UserRole.STUDENT).count()
 
 
-class ClassroomDetailSerializer(serializers.ModelSerializer):
+class ClassroomDetailSerializer(ModelSerializer):
     school_name = serializers.CharField(source='school.name', read_only=True)
     students = serializers.SerializerMethodField()
     
@@ -47,7 +48,7 @@ class ClassroomDetailSerializer(serializers.ModelSerializer):
         return students
 
 
-class ClassroomUserSerializer(serializers.ModelSerializer):
+class ClassroomUserSerializer(ModelSerializer):
     user_username = serializers.CharField(source='user.username', read_only=True)
     user_email = serializers.CharField(source='user.email', read_only=True)
     user_first_name = serializers.CharField(source='user.first_name', read_only=True)

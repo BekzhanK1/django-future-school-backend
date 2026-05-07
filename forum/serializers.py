@@ -1,5 +1,6 @@
 import os
 from rest_framework import serializers
+from common.drf import ModelSerializer
 from django.db.models import Count
 
 from users.models import UserRole
@@ -41,14 +42,14 @@ def validate_forum_files(files, field_name="files"):
             )
 
 
-class ForumPostAttachmentSerializer(serializers.ModelSerializer):
+class ForumPostAttachmentSerializer(ModelSerializer):
     class Meta:
         model = ForumPostAttachment
         fields = ["id", "file", "position", "created_at"]
         read_only_fields = ["id", "created_at"]
 
 
-class ForumPostSerializer(serializers.ModelSerializer):
+class ForumPostSerializer(ModelSerializer):
     author_username = serializers.CharField(
         source="author.username", read_only=True)
     author_first_name = serializers.CharField(
@@ -156,7 +157,7 @@ class ForumPostSerializer(serializers.ModelSerializer):
         return list(user_reactions)
 
 
-class ForumThreadSerializer(serializers.ModelSerializer):
+class ForumThreadSerializer(ModelSerializer):
     created_by_username = serializers.CharField(
         source="created_by.username", read_only=True
     )
@@ -204,7 +205,7 @@ class ForumThreadSerializer(serializers.ModelSerializer):
         return ForumPostSerializer(root_posts, many=True, context=self.context).data
 
 
-class ForumThreadCreateSerializer(serializers.ModelSerializer):
+class ForumThreadCreateSerializer(ModelSerializer):
     """
     Serializer for creating a thread together with the initial post content and optional files.
     """
@@ -333,7 +334,7 @@ class ForumThreadCreateSerializer(serializers.ModelSerializer):
         return thread
 
 
-class PostReactionSerializer(serializers.ModelSerializer):
+class PostReactionSerializer(ModelSerializer):
     user_username = serializers.CharField(
         source="user.username", read_only=True)
 

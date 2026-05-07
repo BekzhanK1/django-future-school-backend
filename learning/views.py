@@ -27,8 +27,7 @@ from users.models import UserRole, User
 from .models import Event
 from .serializers import EventSerializer
 
-from datetime import date, timedelta, datetime
-from django.utils import timezone
+from common.tz import school_timezone
 from .models import EventType
 
 
@@ -695,7 +694,7 @@ class AssignmentViewSet(viewsets.ModelViewSet):
             due_at = datetime.combine(
                 due_date,
                 template.template_due_time,
-                tzinfo=timezone.get_current_timezone(),
+                tzinfo=school_timezone(),
             )
         
         # Update assignment fields from template
@@ -1096,7 +1095,11 @@ class ManualGradeViewSet(viewsets.ModelViewSet):
             )
 
             # Calculate datetime from the provided date to save it
-            graded_at_dt = timezone.make_aware(datetime.combine(graded_at_date, datetime.min.time()))
+            graded_at_dt = datetime.combine(
+                graded_at_date,
+                datetime.min.time(),
+                tzinfo=school_timezone(),
+            )
 
             for grade_item in grades_data:
                 # If value is null, and a record exists, we might want to delete it
@@ -1759,8 +1762,8 @@ class EventViewSet(viewsets.ModelViewSet):
 		events_to_create = []
 		while current <= end_date_val:
 			if current.weekday() in weekdays:
-				start_at_dt = datetime.combine(current, start_time, tzinfo=timezone.get_current_timezone())
-				end_at_dt = datetime.combine(current, end_time, tzinfo=timezone.get_current_timezone())
+				start_at_dt = datetime.combine(current, start_time, tzinfo=school_timezone())
+				end_at_dt = datetime.combine(current, end_time, tzinfo=school_timezone())
 				events_to_create.append(Event(
 					title=title,
 					description=description,
